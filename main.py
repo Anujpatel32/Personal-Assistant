@@ -3,12 +3,15 @@ import webbrowser
 import pyttsx3
 import random
 import musicLibrary
+import time
 
 recognizer = sr.Recognizer()
-engine = pyttsx3.init()
+
 
 
 def speak(text):
+    engine = pyttsx3.init()
+    engine.stop()
     engine.say(text)
     engine.runAndWait()
 
@@ -68,7 +71,8 @@ if __name__ == "__main__":
 
 
             if "mark" in command.lower():
-                speak("Yes")
+                speak("yes sir")
+                time.sleep(0.5)
 
                 with sr.Microphone() as source:
                     print("Listening for command...")

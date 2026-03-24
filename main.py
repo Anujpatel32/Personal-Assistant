@@ -4,6 +4,8 @@ import pyttsx3
 import random
 import musicLibrary
 import time
+from wordhoard import Definitions
+
 
 recognizer = sr.Recognizer()
 
@@ -24,9 +26,18 @@ def play_random_music():
 
 def process_command(command):
     command = command.lower()
+    
+    if "play" in command:
+        for key in musicLibrary.music:
+            if key in command:
+                speak(f"Playing {key.lower()} music")
+                webbrowser.open_new_tab(musicLibrary.music[key])
+                return
+
+        play_random_music()
 
 
-    if "open google" in command:
+    elif "open google" in command:
         speak("Opening Google")
         webbrowser.open_new_tab("https://www.google.com")
 
@@ -43,14 +54,22 @@ def process_command(command):
         webbrowser.open_new_tab("https://www.linkedin.com")
 
 
-    elif "play" in command:
-        for key in musicLibrary.music:
-            if key in command:
-                speak(f"Playing {key.lower()} music")
-                webbrowser.open_new_tab(musicLibrary.music[key])
-                return
 
-        play_random_music()
+    elif "what is" in command or "meaning of" in command:
+        word = command.replace("what is", "").replace("meaning of", "").strip()
+        definitions = Definitions(search_string=word)
+        meaning = definitions.find_definitions()
+
+        if meaning:
+            print(f"The meaning of {word} is: {meaning}")
+            speak(f"The meaning of {word} is: {meaning}")
+        else:
+            speak(f"Sorry, I couldn't find the meaning of {word}")
+
+    elif "shutdown" in command:
+        speak("Shutting down. Goodbye!")
+        exit()
+
 
     else:
         speak("Sorry, I didn't understand that")
@@ -66,7 +85,7 @@ if __name__ == "__main__":
                 print("Waiting for wake word...")
                 audio = recognizer.listen(source, timeout=3, phrase_time_limit=5)
 
-            command = recognizer.recognize_google(audio)
+            command = recognizer.recognize_google(audio,language='en-in')
             print("You said:", command)
 
 
@@ -78,7 +97,7 @@ if __name__ == "__main__":
                     print("Listening for command...")
                     audio = recognizer.listen(source, timeout=3, phrase_time_limit=5)
 
-                command = recognizer.recognize_google(audio)
+                command = recognizer.recognize_google(audio,language='en-in',)
                 print("Command:", command)
 
                 process_command(command)

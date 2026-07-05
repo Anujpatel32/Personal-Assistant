@@ -1,0 +1,26 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+llama_env/
+llama_env_old/
+
+# Local databases / user data
+memory.json
+tasks.json
+
+# Log files and generated files
+wordhoard_error.yaml
+news_dashboard.html
+
+# IDE configs
+.vscode/
+
+# Model files
+*.gguf

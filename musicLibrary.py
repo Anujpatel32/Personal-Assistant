@@ -1,7 +1,7 @@
 
 music = {
-    "liked playlist": "https://youtu.be/PtdITNHi68s?si=Q4cF2UWljz586Iay",
-    "old": "https://youtu.be/AMuRRXCuy-4?si=tZyGVtnJNLbbWQ_c",
-    "english": "https://youtu.be/IpFX2vq8HKw?si=qUFEGYCIGQkMdIz6",
-    "refreshing": "https://youtu.be/AYcxiROIktI?si=hycM3Ozd_RrFSCiD"
+    "liked playlist": "https://www.youtube.com/watch?v=PtdITNHi68s",
+    "old": "https://www.youtube.com/watch?v=AMuRRXCuy-4",
+    "english": "https://www.youtube.com/watch?v=IpFX2vq8HKw",
+    "refreshing": "https://www.youtube.com/watch?v=AYcxiROIktI"
 }

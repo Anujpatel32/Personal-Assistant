@@ -1,0 +1,1196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mark Assistant Dashboard</title>
+    <style>
+        :root {
+            --bg-color: #050505;
+            --primary: #00e5ff;
+            --glow: 0 0 20px rgba(0, 229, 255, 0.5);
+        }
+        body {
+            background-color: var(--bg-color);
+            color: #ffffff;
+            font-family: 'Inter', 'Segoe UI', sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 40px;
+            border-bottom: 1px solid rgba(0, 229, 255, 0.2);
+            background: rgba(0,0,0,0.5);
+        }
+        .header-title {
+            font-size: 24px;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            color: var(--primary);
+            text-shadow: var(--glow);
+        }
+        .orb-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .main-container {
+            flex: 1;
+            display: flex;
+            padding: 20px;
+            gap: 20px;
+            min-height: 0;
+        }
+        .display-panel {
+            flex: 3;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 15px;
+            border: 1px solid rgba(0, 229, 255, 0.1);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: inset 0 0 50px rgba(0, 0, 0, 0.5);
+            min-height: 0;
+        }
+        .display-content {
+            width: 100%;
+            height: 100%;
+            overflow-y: auto;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        /* Custom premium scrollbar for chat window */
+        .display-content::-webkit-scrollbar {
+            width: 8px;
+        }
+        .display-content::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 4px;
+        }
+        .display-content::-webkit-scrollbar-thumb {
+            background: rgba(0, 229, 255, 0.2);
+            border-radius: 4px;
+            border: 1px solid rgba(0, 229, 255, 0.05);
+            box-shadow: 0 0 5px rgba(0, 229, 255, 0.1);
+        }
+        .display-content::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 229, 255, 0.5);
+            box-shadow: 0 0 10px rgba(0, 229, 255, 0.6);
+        }
+        /* Premium glassmorphic Mic Button */
+        .orb {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+        .orb:hover {
+            transform: scale(1.08);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        
+        .mic-icon {
+            width: 32px;
+            height: 32px;
+            color: rgba(255, 255, 255, 0.9);
+            filter: drop-shadow(0 0 5px rgba(255,255,255,0.3));
+            transition: all 0.3s ease;
+        }
+
+        /* State: Offline */
+        .orb.state-offline {
+            background: radial-gradient(circle at 30% 30%, rgba(68, 68, 68, 0.2), rgba(34, 34, 34, 0.4));
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5), inset 0 0 10px rgba(255,255,255,0.05);
+            border-color: rgba(255, 255, 255, 0.05);
+        }
+        .orb.state-offline .mic-icon {
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        /* State: Listening */
+        .orb.state-listening {
+            background: radial-gradient(circle at 30% 30%, #ff0055, #990022);
+            border-color: rgba(255, 0, 85, 0.5);
+            box-shadow: 0 0 35px rgba(255, 0, 85, 0.6);
+            animation: pulse-listening 1.2s infinite alternate cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .orb.state-listening .mic-icon {
+            color: #ffffff;
+            filter: drop-shadow(0 0 8px #ffffff);
+        }
+
+        /* State: Thinking */
+        .orb.state-thinking {
+            background: radial-gradient(circle at 30% 30%, #00e5ff, #0055ff);
+            border-color: rgba(0, 229, 255, 0.5);
+            box-shadow: 0 0 35px rgba(0, 229, 255, 0.6);
+            animation: pulse-thinking 1.5s infinite alternate ease-in-out;
+        }
+        .orb.state-thinking .mic-icon {
+            color: #ffffff;
+            filter: drop-shadow(0 0 8px #00e5ff);
+            animation: spin-icon 2s infinite linear;
+        }
+
+        /* State: Speaking */
+        .orb.state-speaking {
+            background: radial-gradient(circle at 30% 30%, #00ff88, #006633);
+            border-color: rgba(0, 255, 136, 0.5);
+            box-shadow: 0 0 35px rgba(0, 255, 136, 0.6);
+            animation: pulse-speaking 1s infinite alternate cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .orb.state-speaking .mic-icon {
+            color: #ffffff;
+            filter: drop-shadow(0 0 8px #00ff88);
+        }
+
+        @keyframes pulse-listening {
+            0% { transform: scale(1); box-shadow: 0 0 25px rgba(255, 0, 85, 0.4); }
+            100% { transform: scale(1.12); box-shadow: 0 0 45px rgba(255, 0, 85, 0.8); }
+        }
+        @keyframes pulse-thinking {
+            0% { transform: scale(1); box-shadow: 0 0 25px rgba(0, 229, 255, 0.4); }
+            100% { transform: scale(1.08); box-shadow: 0 0 45px rgba(0, 229, 255, 0.8); }
+        }
+        @keyframes pulse-speaking {
+            0% { transform: scale(1); box-shadow: 0 0 25px rgba(0, 255, 136, 0.4); }
+            100% { transform: scale(1.15); box-shadow: 0 0 50px rgba(0, 255, 136, 0.8); }
+        }
+        @keyframes spin-icon {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .status-text {
+            margin-top: 30px;
+            font-size: 16px;
+            color: #888;
+            text-align: center;
+            padding: 0 10px;
+        }
+        .chat-bubble {
+            background: rgba(0, 229, 255, 0.1);
+            border-left: 4px solid var(--primary);
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            font-size: 16px;
+            line-height: 1.5;
+        }
+        iframe {
+            width: 100%;
+            height: 80%;
+            border: none;
+            border-radius: 10px;
+        }
+        /* Dashboard internal classes */
+        .dashboard-container { display: flex; height: 100%; gap: 20px; overflow: hidden; }
+        .dashboard-left { flex: 1; display: flex; align-items: center; min-height: 0; }
+        .dashboard-left iframe { width: 100%; height: 100%; border-radius: 10px; }
+        .dashboard-right { flex: 1; overflow-y: auto; min-height: 0; padding-right: 5px; }
+        .dashboard-right::-webkit-scrollbar { width: 6px; }
+        .dashboard-right::-webkit-scrollbar-thumb { background: #00e5ff; border-radius: 3px; }
+        .article { background: rgba(0,0,0,0.5); padding: 12px 15px; margin-bottom: 10px; border-left: 3px solid #00e5ff; border-radius: 5px;}
+        
+        /* Custom Premium Code Blocks */
+        .code-block-container {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(0, 229, 255, 0.15);
+            border-radius: 8px;
+            margin: 15px 0;
+            overflow: hidden;
+            font-family: 'Fira Code', 'Consolas', 'Courier New', monospace;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        .code-block-header {
+            background: rgba(0, 229, 255, 0.06);
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(0, 229, 255, 0.12);
+        }
+        .code-block-lang {
+            font-size: 11px;
+            color: #00e5ff;
+            font-weight: bold;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+        }
+        .code-copy-btn {
+            background: transparent;
+            border: 1px solid rgba(0, 229, 255, 0.3);
+            color: #00e5ff;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-family: 'Inter', sans-serif;
+        }
+        .code-copy-btn:hover {
+            background: rgba(0, 229, 255, 0.1);
+            border-color: #00e5ff;
+            box-shadow: 0 0 8px rgba(0, 229, 255, 0.3);
+        }
+        .code-block-pre {
+            margin: 0;
+            padding: 15px;
+            overflow-x: auto;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #e0e0e0;
+            background: transparent;
+        }
+        .code-block-pre code {
+            font-family: inherit;
+            color: inherit;
+        }
+        .code-block-pre::-webkit-scrollbar {
+            height: 6px;
+            width: 6px;
+        }
+        .code-block-pre::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.1);
+        }
+        .code-block-pre::-webkit-scrollbar-thumb {
+            background: rgba(0, 229, 255, 0.15);
+            border-radius: 3px;
+        }
+        .code-block-pre::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 229, 255, 0.4);
+        }
+
+        /* --- DUAL PANEL CYBER HUD & TASKS --- */
+        .control-panel {
+            width: 360px;
+            background: rgba(15, 23, 42, 0.35);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-radius: 16px;
+            border: 1px solid rgba(0, 229, 255, 0.15);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), inset 0 0 20px rgba(0, 229, 255, 0.05);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-height: 0;
+        }
+        
+        .tab-header {
+            display: flex;
+            border-bottom: 1px solid rgba(0, 229, 255, 0.15);
+            background: rgba(0, 0, 0, 0.2);
+        }
+        
+        .tab-btn {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: rgba(255, 255, 255, 0.6);
+            padding: 15px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            outline: none;
+        }
+        
+        .tab-btn:hover {
+            color: #ffffff;
+            background: rgba(0, 229, 255, 0.05);
+        }
+        
+        .tab-btn.active {
+            color: var(--primary);
+            text-shadow: 0 0 10px rgba(0, 229, 255, 0.4);
+        }
+        
+        .tab-btn.active::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--primary);
+            box-shadow: 0 0 10px var(--primary);
+        }
+        
+        .tab-content {
+            flex: 1;
+            display: none;
+            flex-direction: column;
+            padding: 20px;
+            overflow-y: auto;
+            min-height: 0;
+        }
+        
+        .tab-content.active {
+            display: flex;
+        }
+        
+        .tab-content::-webkit-scrollbar {
+            width: 4px;
+        }
+        .tab-content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .tab-content::-webkit-scrollbar-thumb {
+            background: rgba(0, 229, 255, 0.15);
+            border-radius: 2px;
+        }
+        .tab-content::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 229, 255, 0.4);
+        }
+
+        .hud-item {
+            margin-bottom: 20px;
+        }
+        
+        .hud-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            letter-spacing: 1.5px;
+            margin-bottom: 8px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        
+        .progress-bar-container {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .progress-bar {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 0 8px currentColor;
+        }
+        
+        .cpu-color {
+            background: var(--primary);
+            color: rgba(0, 229, 255, 0.4);
+        }
+        
+        .ram-color {
+            background: #d946ef;
+            color: rgba(217, 70, 239, 0.4);
+        }
+        
+        .disk-color {
+            background: #f59e0b;
+            color: rgba(245, 158, 11, 0.4);
+        }
+        
+        .gpu-color {
+            background: #10b981;
+            color: rgba(16, 185, 129, 0.4);
+        }
+        
+        .gpu-mem-color {
+            background: #06b6d4;
+            color: rgba(6, 182, 212, 0.4);
+        }
+        
+        .hud-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .hud-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(0, 229, 255, 0.1);
+            border-radius: 12px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s ease;
+        }
+        
+        .hud-card:hover {
+            border-color: rgba(0, 229, 255, 0.3);
+            box-shadow: 0 4px 25px rgba(0, 229, 255, 0.1);
+            transform: translateY(-2px);
+        }
+        
+        .hud-card-title {
+            font-size: 9px;
+            color: rgba(255, 255, 255, 0.4);
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .hud-card-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 2px;
+            text-align: center;
+        }
+        
+        .hud-card-sub {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.5);
+            text-align: center;
+        }
+        
+        .hud-footer-os {
+            margin-top: auto;
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.4);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            padding-top: 15px;
+            text-align: center;
+        }
+        
+        .todo-stats {
+            font-size: 11px;
+            color: rgba(0, 229, 255, 0.8);
+            letter-spacing: 1px;
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .todo-list {
+            flex: 1;
+            overflow-y: auto;
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding-right: 5px;
+        }
+        
+        .todo-list::-webkit-scrollbar {
+            width: 4px;
+        }
+        .todo-list::-webkit-scrollbar-thumb {
+            background: rgba(0, 229, 255, 0.2);
+            border-radius: 2px;
+        }
+        
+        .task-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 15px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            transition: all 0.3s ease;
+            animation: slideIn 0.3s ease;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateY(10px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .task-item:hover {
+            background: rgba(0, 229, 255, 0.03);
+            border-color: rgba(0, 229, 255, 0.15);
+            box-shadow: 0 4px 15px rgba(0, 229, 255, 0.05);
+        }
+        
+        .task-item.completed {
+            opacity: 0.6;
+        }
+        
+        .task-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .task-checkbox-wrapper {
+            position: relative;
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        
+        .task-checkbox-wrapper input {
+            position: absolute;
+            opacity: 0;
+            cursor: pointer;
+            height: 0;
+            width: 0;
+        }
+        
+        .task-checkmark {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 18px;
+            width: 18px;
+            background-color: transparent;
+            border: 2px solid rgba(0, 229, 255, 0.4);
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+        
+        .task-checkbox-wrapper:hover input ~ .task-checkmark {
+            border-color: var(--primary);
+            box-shadow: 0 0 5px rgba(0, 229, 255, 0.3);
+        }
+        
+        .task-checkbox-wrapper input:checked ~ .task-checkmark {
+            background-color: var(--primary);
+            border-color: var(--primary);
+            box-shadow: 0 0 8px rgba(0, 229, 255, 0.5);
+        }
+        
+        .task-checkmark:after {
+            content: "";
+            position: absolute;
+            display: none;
+        }
+        
+        .task-checkbox-wrapper input:checked ~ .task-checkmark:after {
+            display: block;
+        }
+        
+        .task-checkbox-wrapper .task-checkmark:after {
+            left: 5px;
+            top: 2px;
+            width: 4px;
+            height: 8px;
+            border: solid #000;
+            border-width: 0 2px 2px 0;
+            transform: rotate(45deg);
+        }
+        
+        .task-text {
+            font-size: 13px;
+            color: #f3f4f6;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: all 0.2s ease;
+        }
+        
+        .task-item.completed .task-text {
+            text-decoration: line-through;
+            color: rgba(255, 255, 255, 0.4);
+        }
+        
+        .task-delete-btn {
+            background: transparent;
+            border: none;
+            color: rgba(255, 255, 255, 0.3);
+            cursor: pointer;
+            padding: 5px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .task-delete-btn:hover {
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+        }
+        
+        .todo-form {
+            display: flex;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(0, 229, 255, 0.15);
+            border-radius: 10px;
+            padding: 5px;
+            margin-top: auto;
+        }
+        
+        .todo-form input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #ffffff;
+            font-family: inherit;
+            font-size: 13px;
+            padding: 8px 12px;
+            outline: none;
+        }
+        
+        .todo-form input::placeholder {
+            color: rgba(255, 255, 255, 0.3);
+        }
+        
+        .todo-form button {
+            background: rgba(0, 229, 255, 0.1);
+            border: 1px solid rgba(0, 229, 255, 0.3);
+            color: var(--primary);
+            padding: 8px 15px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .todo-form button:hover {
+            background: var(--primary);
+            color: #000000;
+            box-shadow: 0 0 10px rgba(0, 229, 255, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-title">SYSTEM: MARK</div>
+        <div class="orb-container">
+            <div id="status" class="status-text" style="margin-top:0;">Say "Hey Mark"</div>
+            <div id="orb" class="orb state-offline" onclick="handleOrbClick()" title="Click to Wake Up">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mic-icon">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                    <line x1="12" x2="12" y1="19" y2="22"/>
+                </svg>
+            </div>
+        </div>
+    </div>
+    
+    <div class="main-container">
+        <!-- LEFT PANEL: HUD & TASKS -->
+        <div class="control-panel">
+            <div class="tab-header">
+                <button id="hud-tab-btn" class="tab-btn active" onclick="switchTab('hud')">System HUD</button>
+                <button id="tasks-tab-btn" class="tab-btn" onclick="switchTab('tasks')">Task Manager</button>
+            </div>
+            
+            <!-- HUD Content -->
+            <div id="hud-tab" class="tab-content active">
+                <div class="hud-item">
+                    <div class="hud-label">
+                        <span>CPU UTILIZATION</span>
+                        <span id="hud-cpu-val">0%</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div id="hud-cpu-bar" class="progress-bar cpu-color" style="width: 0%;"></div>
+                    </div>
+                </div>
+                
+                <div class="hud-item">
+                    <div class="hud-label">
+                        <span>RAM UTILIZATION</span>
+                        <span id="hud-ram-val">0% (0 / 0 GB)</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div id="hud-ram-bar" class="progress-bar ram-color" style="width: 0%;"></div>
+                    </div>
+                </div>
+
+                <div class="hud-item">
+                    <div class="hud-label">
+                        <span>GPU UTILIZATION</span>
+                        <span id="hud-gpu-val">0%</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div id="hud-gpu-bar" class="progress-bar gpu-color" style="width: 0%;"></div>
+                    </div>
+                </div>
+
+                <div class="hud-item" id="hud-gpu-mem-container" style="display: none;">
+                    <div class="hud-label">
+                        <span>VRAM UTILIZATION</span>
+                        <span id="hud-gpu-mem-val">0% (0 / 0 GB)</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div id="hud-gpu-mem-bar" class="progress-bar gpu-mem-color" style="width: 0%;"></div>
+                    </div>
+                </div>
+
+                <div class="hud-item">
+                    <div class="hud-label">
+                        <span>DISK STORAGE</span>
+                        <span id="hud-disk-val">0%</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div id="hud-disk-bar" class="progress-bar disk-color" style="width: 0%;"></div>
+                    </div>
+                </div>
+
+                <div class="hud-grid">
+                    <div class="hud-card">
+                        <div class="hud-card-title">BATTERY</div>
+                        <div class="hud-card-value" id="hud-battery-val">N/A</div>
+                        <div class="hud-card-sub" id="hud-battery-sub">-</div>
+                    </div>
+                    <div class="hud-card">
+                        <div class="hud-card-title">PROCESSES</div>
+                        <div class="hud-card-value" id="hud-processes-val">0</div>
+                        <div class="hud-card-sub">Active PIDs</div>
+                    </div>
+                </div>
+
+                <div class="hud-footer-os" id="hud-os-val">OS: Unknown</div>
+            </div>
+            
+            <!-- Tasks Content -->
+            <div id="tasks-tab" class="tab-content">
+                <div class="todo-stats">
+                    <span>TASKS</span>
+                    <span id="task-counter">0 Active / 0 Total</span>
+                </div>
+                <div class="todo-list" id="todo-list">
+                    <!-- Tasks injected here -->
+                </div>
+                <form class="todo-form" onsubmit="handleAddTask(event)">
+                    <input type="text" id="new-task-input" placeholder="Type a new task..." autocomplete="off">
+                    <button type="submit">Add</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- RIGHT PANEL: CHAT & DISPLAY -->
+        <div class="display-panel" style="flex: 2;">
+            <div id="display-content" class="display-content">
+                <div style="text-align: center; color: rgba(255,255,255,0.3); margin-top: 20%;">
+                    System Offline. Say 'Hey Mark' to Wake Up.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const orb = document.getElementById('orb');
+        const status = document.getElementById('status');
+        const display = document.getElementById('display-content');
+
+        // Tab Switching Logic
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            if (tabName === 'hud') {
+                document.getElementById('hud-tab-btn').classList.add('active');
+                document.getElementById('hud-tab').classList.add('active');
+            } else {
+                document.getElementById('tasks-tab-btn').classList.add('active');
+                document.getElementById('tasks-tab').classList.add('active');
+            }
+        }
+
+        // Render Todo Checklist
+        let cachedTasksJson = '';
+        function renderTasks(tasks) {
+            const listContainer = document.getElementById('todo-list');
+            const counter = document.getElementById('task-counter');
+            
+            // Check if tasks have actually changed to avoid re-rendering layout and losing input focus
+            const currentTasksJson = JSON.stringify(tasks);
+            if (currentTasksJson === cachedTasksJson) return;
+            cachedTasksJson = currentTasksJson;
+            
+            listContainer.innerHTML = '';
+            
+            if (!tasks || tasks.length === 0) {
+                listContainer.innerHTML = `
+                    <div style="text-align: center; color: rgba(255,255,255,0.2); font-size: 11px; margin-top: 40px; padding: 0 10px; line-height: 1.6;">
+                        No daily tasks scheduled.<br>Say "add task study coding" or type one below.
+                    </div>
+                `;
+                counter.innerText = '0 Active / 0 Total';
+                return;
+            }
+            
+            const activeCount = tasks.filter(t => !t.completed).length;
+            counter.innerText = `${activeCount} Active / ${tasks.length} Total`;
+            
+            tasks.forEach(t => {
+                const item = document.createElement('div');
+                item.className = `task-item ${t.completed ? 'completed' : ''}`;
+                item.innerHTML = `
+                    <div class="task-left">
+                        <label class="task-checkbox-wrapper">
+                            <input type="checkbox" ${t.completed ? 'checked' : ''} onchange="handleToggleTask(${t.id})">
+                            <span class="task-checkmark"></span>
+                        </label>
+                        <span class="task-text" title="${escapeHtml(t.text)}">${escapeHtml(t.text)}</span>
+                    </div>
+                    <button class="task-delete-btn" onclick="handleDeleteTask(${t.id})" title="Delete Task">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                    </button>
+                `;
+                listContainer.appendChild(item);
+            });
+        }
+
+        // Add Task Handler
+        async function handleAddTask(event) {
+            event.preventDefault();
+            const input = document.getElementById('new-task-input');
+            const text = input.value.trim();
+            if (!text) return;
+            
+            try {
+                const res = await fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text })
+                });
+                if (res.ok) {
+                    input.value = '';
+                    pollState();
+                }
+            } catch (err) {
+                console.error('Error adding task:', err);
+            }
+        }
+
+        // Toggle Task Handler
+        async function handleToggleTask(id) {
+            try {
+                const res = await fetch(`/api/tasks/${id}/toggle`, {
+                    method: 'POST'
+                });
+                if (res.ok) {
+                    pollState();
+                }
+            } catch (err) {
+                console.error('Error toggling task:', err);
+            }
+        }
+
+        // Delete Task Handler
+        async function handleDeleteTask(id) {
+            try {
+                const res = await fetch(`/api/tasks/${id}`, {
+                    method: 'DELETE'
+                });
+                if (res.ok) {
+                    pollState();
+                }
+            } catch (err) {
+                console.error('Error deleting task:', err);
+            }
+        }
+
+        let chatLogLength = 0;
+        let lastDisplayType = null;
+        let initialized = false;
+        let fetchFailCount = 0;
+        const MAX_FAIL_BEFORE_WARNING = 6; // 3 seconds at 500ms interval
+        let currentStatus = 'offline';
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function scrollToBottom() {
+            setTimeout(() => {
+                display.scrollTo({
+                    top: display.scrollHeight,
+                    behavior: 'smooth'
+                });
+            }, 50);
+        }
+
+        async function copyToClipboard(id, btn) {
+            const codeEl = document.getElementById(id);
+            if (!codeEl) return;
+            const textToCopy = codeEl.textContent;
+            
+            try {
+                await navigator.clipboard.writeText(textToCopy);
+                const span = btn.querySelector('span');
+                const originalText = span.innerText;
+                
+                // Visual feedback
+                btn.style.background = 'rgba(0, 255, 136, 0.2)';
+                btn.style.borderColor = '#00ff88';
+                btn.style.color = '#00ff88';
+                span.innerText = 'Copied!';
+                
+                setTimeout(() => {
+                    btn.style.background = 'transparent';
+                    btn.style.borderColor = 'rgba(0, 229, 255, 0.3)';
+                    btn.style.color = '#00e5ff';
+                    span.innerText = originalText;
+                }, 2000);
+            } catch (err) {
+                console.error('Failed to copy text: ', err);
+            }
+        }
+
+        function formatMarkdown(text) {
+            if (!text) return '';
+            const parts = text.split('```');
+            let html = '';
+            
+            for (let i = 0; i < parts.length; i++) {
+                if (i % 2 === 0) {
+                    // Regular text: escape HTML first
+                    let textPart = escapeHtml(parts[i]);
+                    // Parse inline code like `something`
+                    textPart = textPart.replace(/`([^`]+)`/g, '<code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em; color: #00e5ff;">$1</code>');
+                    html += textPart.replace(/\n/g, '<br>');
+                } else {
+                    // Code block
+                    const block = parts[i];
+                    const firstNewline = block.indexOf('\n');
+                    let language = 'CODE';
+                    let code = block;
+                    
+                    if (firstNewline !== -1) {
+                        const langCandidate = block.substring(0, firstNewline).trim().toUpperCase();
+                        if (langCandidate && langCandidate.length < 15) {
+                            language = langCandidate;
+                            code = block.substring(firstNewline + 1);
+                        }
+                    }
+                    
+                    code = code.trim();
+                    const escapedCode = escapeHtml(code);
+                    const blockId = 'code-' + Math.random().toString(36).substr(2, 9);
+                    
+                    html += `
+                        <div class="code-block-container">
+                            <div class="code-block-header">
+                                <span class="code-block-lang">${language}</span>
+                                <button class="code-copy-btn" onclick="copyToClipboard('${blockId}', this)">
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                                    <span>Copy</span>
+                                </button>
+                            </div>
+                            <pre class="code-block-pre"><code id="${blockId}">${escapedCode}</code></pre>
+                        </div>
+                    `;
+                }
+            }
+            return html;
+        }
+
+        function appendChat(text, type='assistant') {
+            const div = document.createElement('div');
+            div.className = 'chat-bubble';
+            div.style.borderColor = type === 'user' ? '#fff' : '#00e5ff';
+            div.innerHTML = `<strong>${escapeHtml(type.toUpperCase())}:</strong> ${formatMarkdown(text)}`;
+            display.appendChild(div);
+            scrollToBottom();
+        }
+
+        async function handleOrbClick() {
+            if (currentStatus === 'speaking') {
+                await stopSpeaking();
+            } else if (currentStatus === 'offline') {
+                await manualWake();
+            }
+        }
+
+        async function manualWake() {
+            await fetch('/api/wake', {method: 'POST'});
+        }
+
+        async function stopSpeaking() {
+            await fetch('/api/stop', {method: 'POST'});
+        }
+
+        async function pollState() {
+            try {
+                const res = await fetch('/api/state');
+                if (!res.ok) throw new Error('Server error');
+                const data = await res.json();
+                fetchFailCount = 0;
+
+                // Hide connection warning if it was showing
+                const connWarn = document.getElementById('conn-warning');
+                if (connWarn) connWarn.remove();
+                
+                // Track current state
+                currentStatus = data.status;
+
+                // Reset state classes
+                orb.classList.remove('state-offline', 'state-listening', 'state-thinking', 'state-speaking');
+
+                // Update Orb & Status based on states
+                if (data.status === 'offline') {
+                    orb.classList.add('state-offline');
+                    orb.setAttribute('title', 'Click to Wake Up');
+                    status.innerHTML = "Say 'Hey Mark'<br>or Click to Wake Up";
+                } else if (data.status === 'listening') {
+                    orb.classList.add('state-listening');
+                    orb.setAttribute('title', 'Listening...');
+                    status.innerText = "Mark is listening...";
+                } else if (data.status === 'thinking') {
+                    orb.classList.add('state-thinking');
+                    orb.setAttribute('title', 'Processing...');
+                    status.innerText = "Processing...";
+                } else if (data.status === 'speaking') {
+                    orb.classList.add('state-speaking');
+                    orb.setAttribute('title', 'Click to Stop Speaking');
+                    status.innerText = "Mark is speaking (Click to Stop)...";
+                }
+
+                // Update PC Diagnostics HUD
+                if (data.pc_stats) {
+                    const stats = data.pc_stats;
+                    
+                    // CPU
+                    document.getElementById('hud-cpu-val').innerText = `${stats.cpu.toFixed(1)}%`;
+                    document.getElementById('hud-cpu-bar').style.width = `${stats.cpu}%`;
+                    
+                    // RAM
+                    document.getElementById('hud-ram-val').innerText = `${stats.ram.toFixed(1)}% (${stats.ram_used_gb.toFixed(1)} / ${stats.ram_total_gb.toFixed(1)} GB)`;
+                    document.getElementById('hud-ram-bar').style.width = `${stats.ram}%`;
+                    
+                    // GPU
+                    if (stats.gpu !== undefined) {
+                        document.getElementById('hud-gpu-val').innerText = `${stats.gpu.toFixed(1)}%`;
+                        document.getElementById('hud-gpu-bar').style.width = `${stats.gpu}%`;
+                    }
+                    
+                    // VRAM
+                    const gpuMemContainer = document.getElementById('hud-gpu-mem-container');
+                    if (stats.gpu_mem_pct !== undefined && stats.gpu_mem_total > 0) {
+                        document.getElementById('hud-gpu-mem-val').innerText = `${stats.gpu_mem_pct.toFixed(1)}% (${stats.gpu_mem_used.toFixed(1)} / ${stats.gpu_mem_total.toFixed(1)} GB)`;
+                        document.getElementById('hud-gpu-mem-bar').style.width = `${stats.gpu_mem_pct}%`;
+                        gpuMemContainer.style.display = 'block';
+                    } else {
+                        gpuMemContainer.style.display = 'none';
+                    }
+                    
+                    // Disk
+                    document.getElementById('hud-disk-val').innerText = `${stats.disk.toFixed(1)}%`;
+                    document.getElementById('hud-disk-bar').style.width = `${stats.disk}%`;
+                    
+                    // Battery
+                    if (stats.battery !== null) {
+                        const stateStr = stats.battery_plugged ? 'Charging' : 'Discharging';
+                        document.getElementById('hud-battery-val').innerText = `${stats.battery}%`;
+                        document.getElementById('hud-battery-sub').innerText = stateStr;
+                    } else {
+                        document.getElementById('hud-battery-val').innerText = 'N/A';
+                        document.getElementById('hud-battery-sub').innerText = 'No battery detected';
+                    }
+                    
+                    // Processes
+                    document.getElementById('hud-processes-val').innerText = stats.processes;
+                    
+                    // OS name
+                    document.getElementById('hud-os-val').innerText = `OS: ${stats.os}`;
+                }
+
+                // Render Todo list
+                if (data.tasks) {
+                    renderTasks(data.tasks);
+                }
+
+                // Update Chat Log
+                if (data.chat_log.length > chatLogLength) {
+                    if (!initialized && !data.display_data) {
+                        display.innerHTML = '';
+                        initialized = true;
+                    }
+                    for (let i = chatLogLength; i < data.chat_log.length; i++) {
+                        appendChat(data.chat_log[i].text, data.chat_log[i].sender);
+                    }
+                    chatLogLength = data.chat_log.length;
+                }
+
+                // If display_data was cleared by backend, revert to chat log view
+                if (!data.display_data && lastDisplayType !== null && data.status !== 'offline') {
+                    lastDisplayType = null;
+                    display.innerHTML = '';
+                    for (let i = 0; i < data.chat_log.length; i++) {
+                        appendChat(data.chat_log[i].text, data.chat_log[i].sender);
+                    }
+                }
+
+                if (data.display_data) {
+                    const displayKey = JSON.stringify(data.display_data);
+                    if (displayKey !== lastDisplayType) {
+                        lastDisplayType = displayKey;
+                        display.innerHTML = '';
+                        let d = data.display_data;
+                        if (d.type === 'youtube') {
+                            display.innerHTML = `<iframe src="${escapeHtml(d.url)}" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
+                        } else if (d.type === 'news') {
+                            display.innerHTML = `
+                                <div class="dashboard-container">
+                                    <div class="dashboard-left">
+                                        ${d.video_id ? `<iframe src="https://www.youtube-nocookie.com/embed/${escapeHtml(d.video_id)}?autoplay=1&mute=1" allow="autoplay; encrypted-media"></iframe>` : '<p>No video</p>'}
+                                    </div>
+                                    <div class="dashboard-right">
+                                        <h2 style="color: #00e5ff;">${escapeHtml(d.topic.toUpperCase())} NEWS</h2>
+                                        ${d.articles_html}
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    }
+                }
+                
+                if (data.status === 'offline' && !data.display_data && chatLogLength > 0) {
+                    chatLogLength = 0;
+                    lastDisplayType = null;
+                    initialized = false;
+                    display.innerHTML = `<div style="text-align: center; color: rgba(255,255,255,0.3); margin-top: 20%;">System Offline. Say 'Hey Mark' to Wake Up.</div>`;
+                }
+
+            } catch (e) {
+                fetchFailCount++;
+                if (fetchFailCount >= MAX_FAIL_BEFORE_WARNING && !document.getElementById('conn-warning')) {
+                    const warn = document.createElement('div');
+                    warn.id = 'conn-warning';
+                    warn.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#ff0044;color:#fff;padding:8px 20px;border-radius:8px;font-size:14px;z-index:999;';
+                    warn.textContent = '⚠ Connection lost — retrying...';
+                    document.body.appendChild(warn);
+                }
+            }
+        }
+
+        setInterval(pollState, 500); // poll every 500ms
+    </script>
+</body>
+</html>

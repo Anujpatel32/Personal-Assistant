@@ -1,9 +1,10 @@
-# Byte-compiled / optimized / DLL files
+# ===== Python =====
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 
-# Environments
+# ===== Virtual Environments =====
 .venv/
 venv/
 ENV/
@@ -11,16 +12,70 @@ env/
 llama_env/
 llama_env_old/
 
-# Local databases / user data
+# ===== Secrets =====
+.env
+
+# ===== User Data & Local State =====
+# API keys, personal memory, chat logs — never commit these
 memory.json
 tasks.json
+chat_history.json
+trackers.json
+task_queue.json
+plugins_config.json
+documents_index.json
+screen_memory_index.json
 
-# Log files and generated files
-wordhoard_error.yaml
+# Personal documents uploaded to knowledge base
+documents/
+
+# ===== Generated / Temporary Files =====
+*.log
 news_dashboard.html
+temp_*.wav
+temp_*.mp3
+temp_screen.png
+pythonw_err.txt
+dangling_*.txt
+wordhoard_error.yaml
 
-# IDE configs
+# ===== IDE & Editor Configs =====
 .vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-# Model files
+# ===== AI Agent / GSD Tool Configs (not part of project source) =====
+.agent/
+.agents/
+.gemini/
+.gsd/
+GSD-STYLE.md
+PROJECT_RULES.md
+model_capabilities.yaml
+adapters/
+scripts/
+
+# ===== Model & Binary Files =====
 *.gguf
+*.onnx
+*.bin
+*.pth
+*.pt
+
+# ===== Build & Distribution Artifacts =====
+build/
+dist/
+*.spec
+*.exe
+
+# ===== OS Files =====
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ===== Misc Generated =====
+Optimize_Windows_Startup.ps1
+project_optimization_analysis.md
+coding/__pycache__/

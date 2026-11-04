@@ -1,0 +1,18 @@
+{
+  "morning": {
+    "enabled": true,
+    "greeting_text": "Good morning, Boss!",
+    "farewell": "Have a wonderful day!",
+    "city": "Pune",
+    "include_time": true,
+    "include_weather": true,
+    "include_tasks": true,
+    "include_news": true
+  },
+  "night": {
+    "enabled": true,
+    "farewell_text": "Sleep well, Boss!",
+    "dim_brightness_to": 10,
+    "enable_dnd": true
+  }
+}

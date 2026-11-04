@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Meow - Mobile Companion</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Space+Grotesk:wght@400;600&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --bg-base: #03001e;
+            --bg-gradient: linear-gradient(135deg, #03001e 0%, #7303c0 50%, #ec38bc 100%);
+            --glass-bg: rgba(255, 255, 255, 0.03);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --accent-cyan: #00f2fe;
+            --accent-pink: #ec38bc;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-base);
+            background-image: var(--bg-gradient);
+            background-attachment: fixed;
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-x: hidden;
+            padding-bottom: 30px;
+        }
+
+        /* Glassmorphism Header */
+        header {
+            width: 100%;
+            padding: 20px;
+            text-align: center;
+            background: rgba(3, 0, 30, 0.7);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--glass-border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .header-title {
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: 3px;
+            color: var(--accent-cyan);
+            text-shadow: 0 0 10px rgba(0, 242, 254, 0.5);
+            text-transform: uppercase;
+        }
+
+        .header-sub {
+            font-size: 10px;
+            letter-spacing: 2px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        /* Container Layout */
+        .container {
+            width: 90%;
+            max-width: 500px;
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* Glass Cards */
+        .card {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 20px;
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .card-title {
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 1.5px;
+            color: var(--accent-cyan);
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Telemetry Elements */
+        .telemetry-row {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .telemetry-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+        }
+
+        .telemetry-bar-bg {
+            height: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .telemetry-bar-fill {
+            height: 100%;
+            background: var(--accent-cyan);
+            box-shadow: 0 0 8px var(--accent-cyan);
+            width: 0%;
+            transition: width 0.5s ease;
+        }
+
+        .telemetry-bar-fill.ram {
+            background: var(--accent-pink);
+            box-shadow: 0 0 8px var(--accent-pink);
+        }
+
+        /* Central Speech Orb */
+        .orb-card {
+            align-items: center;
+            justify-content: center;
+            padding: 30px;
+        }
+
+        .orb-btn {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            color: var(--accent-cyan);
+            font-size: 28px;
+        }
+
+        .orb-btn::before {
+            content: '';
+            position: absolute;
+            top: -6px;
+            left: -6px;
+            right: -6px;
+            bottom: -6px;
+            border-radius: 50%;
+            border: 1px solid rgba(0, 242, 254, 0.15);
+            opacity: 0;
+            transition: all 0.3s ease;
+        }
+
+        .orb-btn:hover {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 30px rgba(0, 242, 254, 0.4);
+            transform: scale(1.05);
+        }
+
+        /* Active Voice States */
+        .orb-btn.listening {
+            border-color: #ff0055;
+            box-shadow: 0 0 35px rgba(255, 0, 85, 0.6);
+            color: #ff0055;
+            animation: pulse-listening 1.2s infinite alternate;
+        }
+
+        .orb-btn.listening::before {
+            opacity: 1;
+            animation: ripple 1.2s infinite;
+        }
+
+        @keyframes pulse-listening {
+            0% { transform: scale(1); }
+            100% { transform: scale(1.08); }
+        }
+
+        @keyframes ripple {
+            0% { transform: scale(1); opacity: 0.8; }
+            100% { transform: scale(1.4); opacity: 0; }
+        }
+
+        /* Live Transcription text */
+        .transcript-box {
+            font-size: 13.5px;
+            color: var(--text-main);
+            text-align: center;
+            min-height: 20px;
+            font-style: italic;
+        }
+
+        /* Control Input Elements */
+        .input-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        .text-input {
+            flex: 1;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--glass-border);
+            border-radius: 10px;
+            color: var(--text-main);
+            outline: none;
+            font-family: inherit;
+            font-size: 13.5px;
+            transition: all 0.3s ease;
+        }
+
+        .text-input:focus {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 8px rgba(0, 242, 254, 0.15);
+        }
+
+        .btn {
+            background: rgba(0, 242, 254, 0.08);
+            border: 1px solid var(--accent-cyan);
+            color: var(--accent-cyan);
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            background: var(--accent-cyan);
+            color: #000;
+            box-shadow: 0 0 12px rgba(0, 242, 254, 0.4);
+        }
+
+        .btn.secondary {
+            background: rgba(255, 255, 255, 0.03);
+            border-color: var(--glass-border);
+            color: var(--text-main);
+        }
+
+        .btn.secondary:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        /* Sliders */
+        .slider-row {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .slider-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .range-slider {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+            outline: none;
+            -webkit-appearance: none;
+            accent-color: var(--accent-cyan);
+        }
+
+        /* Media buttons container */
+        .media-controls {
+            display: flex;
+            justify-content: center;
+            gap: 25px;
+            margin-top: 10px;
+        }
+
+        .media-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-main);
+            font-size: 20px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .media-btn:hover {
+            color: var(--accent-cyan);
+            transform: scale(1.15);
+        }
+
+        /* Textarea for clipboard */
+        .textarea {
+            width: 100%;
+            height: 100px;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--glass-border);
+            border-radius: 10px;
+            color: var(--text-main);
+            font-family: inherit;
+            font-size: 13px;
+            outline: none;
+            resize: vertical;
+        }
+
+        /* Toast Notifications */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: rgba(10, 10, 20, 0.85);
+            border: 1px solid var(--glass-border);
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 12.5px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+            z-index: 1000;
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            color: var(--accent-cyan);
+        }
+
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* PC Notification Overlay */
+        .notification-banner {
+            width: 90%;
+            max-width: 500px;
+            background: rgba(0, 242, 254, 0.04);
+            border: 1px solid rgba(0, 242, 254, 0.2);
+            border-radius: 12px;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 15px;
+            backdrop-filter: blur(5px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+        }
+
+        .notification-icon {
+            color: var(--accent-cyan);
+            font-size: 18px;
+            animation: pulse-active 1.5s infinite alternate;
+        }
+
+        .notification-content {
+            flex: 1;
+            font-size: 11.5px;
+            color: var(--text-main);
+            line-height: 1.4;
+        }
+
+        .notification-title {
+            font-weight: bold;
+            color: var(--accent-cyan);
+            text-transform: uppercase;
+            font-size: 9px;
+            letter-spacing: 1px;
+            margin-bottom: 2px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-title">Meow Companion</div>
+        <div class="header-sub">Mobile Remote Terminal</div>
+    </header>
+
+    <!-- Live Notification Banner (PC Status feedback) -->
+    <div class="notification-banner" id="notif-banner" style="display: none;">
+        <i class="fa-solid fa-circle-nodes notification-icon"></i>
+        <div class="notification-content">
+            <div class="notification-title" id="notif-title">PC STATUS</div>
+            <div id="notif-text">Systems connected. Welcome back, Boss!</div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Telemetry Card -->
+        <div class="card">
+            <div class="card-title">
+                <i class="fa-solid fa-chart-simple"></i> PC Diagnostics
+            </div>
+            
+            <div class="telemetry-row">
+                <div class="telemetry-label">
+                    <span>CPU Load</span>
+                    <span id="cpu-val">0%</span>
+                </div>
+                <div class="telemetry-bar-bg">
+                    <div class="telemetry-bar-fill" id="cpu-bar"></div>
+                </div>
+            </div>
+
+            <div class="telemetry-row">
+                <div class="telemetry-label">
+                    <span>RAM Load</span>
+                    <span id="ram-val">0%</span>
+                </div>
+                <div class="telemetry-bar-bg">
+                    <div class="telemetry-bar-fill ram" id="ram-bar"></div>
+                </div>
+            </div>
+
+            <div class="telemetry-row">
+                <div class="telemetry-label">
+                    <span>Battery Status</span>
+                    <span id="battery-val">N/A</span>
+                </div>
+                <div class="telemetry-bar-bg" id="battery-container" style="display: none;">
+                    <div class="telemetry-bar-fill" id="battery-bar" style="background: var(--accent-cyan);"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Voice Control Card -->
+        <div class="card orb-card">
+            <div class="card-title" style="align-self: flex-start;">
+                <i class="fa-solid fa-microphone"></i> Voice Control
+            </div>
+            
+            <div class="orb-btn" id="orb-btn" onclick="toggleSpeech()">
+                <i class="fa-solid fa-microphone-lines"></i>
+            </div>
+            
+            <div class="transcript-box" id="transcript-display">Tap mic to speak commands</div>
+        </div>
+
+        <!-- Remote Commands Card -->
+        <div class="card">
+            <div class="card-title">
+                <i class="fa-solid fa-terminal"></i> Remote Command
+            </div>
+            <div class="input-group">
+                <input type="text" class="text-input" id="cmd-input" placeholder="Type a command (e.g. open chrome)" onkeydown="if(event.key === 'Enter') sendCommand()">
+                <button class="btn" onclick="sendCommand()">
+                    <i class="fa-solid fa-paper-plane"></i> Send
+                </button>
+            </div>
+        </div>
+
+        <!-- System Controls Card -->
+        <div class="card">
+            <div class="card-title">
+                <i class="fa-solid fa-sliders"></i> Hardware Controls
+            </div>
+
+            <div class="slider-row">
+                <div class="slider-label">
+                    <span>PC Volume</span>
+                    <span id="vol-val">50%</span>
+                </div>
+                <input type="range" class="range-slider" id="vol-slider" min="0" max="100" value="50" onchange="adjustVolume(this.value)">
+            </div>
+
+            <div class="slider-row" style="margin-top: 10px;">
+                <div class="slider-label">
+                    <span>Screen Brightness</span>
+                    <span id="brightness-val">50%</span>
+                </div>
+                <input type="range" class="range-slider" id="brightness-slider" min="0" max="100" value="50" onchange="adjustBrightness(this.value)">
+            </div>
+
+            <div class="media-controls">
+                <button class="media-btn" onclick="sendControl('prev')"><i class="fa-solid fa-backward-step"></i></button>
+                <button class="media-btn" onclick="sendControl('play_pause')" style="font-size: 26px; margin: 0 15px;"><i class="fa-solid fa-circle-play"></i></button>
+                <button class="media-btn" onclick="sendControl('next')"><i class="fa-solid fa-forward-step"></i></button>
+            </div>
+        </div>
+
+        <!-- Clipboard Sync Card -->
+        <div class="card">
+            <div class="card-title">
+                <i class="fa-solid fa-copy"></i> Clipboard Mirror
+            </div>
+            <textarea class="textarea" id="clip-textarea" placeholder="Clipboard contents..."></textarea>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn secondary" style="flex: 1;" onclick="pullClipboard()">
+                    <i class="fa-solid fa-arrow-down"></i> Pull PC
+                </button>
+                <button class="btn" style="flex: 1;" onclick="pushClipboard()">
+                    <i class="fa-solid fa-arrow-up"></i> Push PC
+                </button>
+            </div>
+        </div>
+
+        <!-- File Transfer Card (Knowledge Base Upload) -->
+        <div class="card">
+            <div class="card-title">
+                <i class="fa-solid fa-cloud-arrow-up"></i> File Transfer
+            </div>
+            <div style="font-size: 11.5px; color: var(--text-muted); line-height: 1.5;">
+                Send files (PDF, TXT, MD, Py, JS) to the PC. They will be added and indexed in your assistant's Knowledge Base.
+            </div>
+            <div class="input-group" style="flex-direction: column; gap: 10px;">
+                <input type="file" id="file-selector" style="display: none;" onchange="handleFileChange()">
+                <button class="btn secondary" style="width: 100%; border-style: dashed; padding: 20px; font-size: 12px;" onclick="document.getElementById('file-selector').click()" id="file-label-btn">
+                    <i class="fa-solid fa-file-arrow-up"></i> Choose File to Upload
+                </button>
+                <button class="btn" id="upload-submit-btn" onclick="uploadFile()" style="width: 100%; display: none;">
+                    <i class="fa-solid fa-arrow-up-from-bracket"></i> Transfer to PC
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast message overlay -->
+    <div class="toast" id="toast">Toast Message</div>
+
+    <script>
+        // State variables
+        let recognition = null;
+        let isListening = false;
+        let selectedFile = null;
+
+        // Toast Helper
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 2000);
+        }
+
+        // Web Speech API Voice Control Setup
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                isListening = true;
+                const orb = document.getElementById('orb-btn');
+                orb.classList.add('listening');
+                document.getElementById('transcript-display').textContent = "Listening...";
+            };
+
+            recognition.onend = () => {
+                isListening = false;
+                const orb = document.getElementById('orb-btn');
+                orb.classList.remove('listening');
+            };
+
+            recognition.onerror = (e) => {
+                console.error("Speech Error:", e);
+                showToast("Speech Recognition Error!");
+                document.getElementById('transcript-display').textContent = "Tap mic to speak commands";
+            };
+
+            recognition.onresult = async (event) => {
+                const transcript = event.results[0][0].transcript;
+                document.getElementById('transcript-display').textContent = `"${transcript}"`;
+                
+                // POST to remote commands
+                try {
+                    const res = await fetch('/api/mobile/command', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ command: transcript })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        showToast("Command sent!");
+                    } else {
+                        showToast("Error: " + data.error);
+                    }
+                } catch (err) {
+                    showToast("Failed to connect to PC!");
+                }
+            };
+        }
+
+        function toggleSpeech() {
+            if (!recognition) {
+                showToast("Speech recognition not supported on this browser!");
+                return;
+            }
+            if (isListening) {
+                recognition.stop();
+            } else {
+                recognition.start();
+            }
+        }
+
+        // Send Text Command
+        async function sendCommand() {
+            const input = document.getElementById('cmd-input');
+            const command = input.value.trim();
+            if (!command) return;
+
+            try {
+                const res = await fetch('/api/mobile/command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast("Command sent!");
+                    input.value = '';
+                } else {
+                    showToast("Error: " + data.error);
+                }
+            } catch (err) {
+                showToast("Failed to connect to PC!");
+            }
+        }
+
+        // Control Sliders and Media
+        async function adjustVolume(val) {
+            document.getElementById('vol-val').textContent = val + '%';
+            await fetch('/api/mobile/control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'volume', value: val })
+            });
+        }
+
+        async function adjustBrightness(val) {
+            document.getElementById('brightness-val').textContent = val + '%';
+            await fetch('/api/mobile/control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'brightness', value: val })
+            });
+        }
+
+        async function sendControl(action) {
+            try {
+                const res = await fetch('/api/mobile/control', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast("Control triggered!");
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        // Clipboard operations
+        async function pullClipboard() {
+            try {
+                const res = await fetch('/api/mobile/clipboard');
+                const data = await res.json();
+                document.getElementById('clip-textarea').value = data.text || '';
+                showToast("Pulled PC Clipboard!");
+            } catch (err) {
+                showToast("Pull failed!");
+            }
+        }
+
+        async function pushClipboard() {
+            const text = document.getElementById('clip-textarea').value;
+            try {
+                const res = await fetch('/api/mobile/clipboard', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast("Pushed to PC!");
+                } else {
+                    showToast("Push failed: " + data.error);
+                }
+            } catch (err) {
+                showToast("Push failed!");
+            }
+        }
+
+        // File Selection & Upload
+        function handleFileChange() {
+            const selector = document.getElementById('file-selector');
+            if (selector.files.length > 0) {
+                selectedFile = selector.files[0];
+                document.getElementById('file-label-btn').innerHTML = `<i class="fa-solid fa-file"></i> ${selectedFile.name}`;
+                document.getElementById('upload-submit-btn').style.display = 'block';
+            }
+        }
+
+        async function uploadFile() {
+            if (!selectedFile) return;
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+
+            const uploadBtn = document.getElementById('upload-submit-btn');
+            uploadBtn.disabled = true;
+            uploadBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Transferring...`;
+
+            try {
+                const res = await fetch('/api/documents', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    showToast("Transfer complete & indexed!");
+                    // Reset upload state
+                    selectedFile = null;
+                    document.getElementById('file-selector').value = '';
+                    document.getElementById('file-label-btn').innerHTML = `<i class="fa-solid fa-file-arrow-up"></i> Choose File to Upload`;
+                    uploadBtn.style.display = 'none';
+                } else {
+                    showToast("Upload failed: " + (data.error || "unknown error"));
+                }
+            } catch (err) {
+                showToast("Network upload error!");
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket"></i> Transfer to PC`;
+            }
+        }
+
+        // Telemetry Polling Loop
+        async function pollDiagnostics() {
+            try {
+                const res = await fetch('/api/state');
+                const data = await res.json();
+
+                // CPU
+                if (data.pc_stats && data.pc_stats.cpu !== undefined) {
+                    const cpu = Math.round(data.pc_stats.cpu);
+                    document.getElementById('cpu-val').textContent = cpu + '%';
+                    document.getElementById('cpu-bar').style.width = cpu + '%';
+                }
+
+                // RAM
+                if (data.pc_stats && data.pc_stats.ram !== undefined) {
+                    const ram = Math.round(data.pc_stats.ram);
+                    document.getElementById('ram-val').textContent = ram + '%';
+                    document.getElementById('ram-bar').style.width = ram + '%';
+                }
+
+                // Battery
+                if (data.pc_stats && data.pc_stats.battery !== null && data.pc_stats.battery !== undefined) {
+                    const batt = Math.round(data.pc_stats.battery);
+                    const charging = data.pc_stats.battery_plugged;
+                    document.getElementById('battery-val').textContent = batt + '%' + (charging ? " (Charging)" : " (Discharging)");
+                    document.getElementById('battery-bar').style.width = batt + '%';
+                    document.getElementById('battery-container').style.display = 'block';
+                } else {
+                    document.getElementById('battery-val').textContent = 'N/A';
+                    document.getElementById('battery-container').style.display = 'none';
+                }
+
+                // Live Notification (Chat log / status feedback)
+                if (data.status) {
+                    const banner = document.getElementById('notif-banner');
+                    const text = document.getElementById('notif-text');
+                    const title = document.getElementById('notif-title');
+                    
+                    banner.style.display = 'flex';
+                    title.textContent = `PC STATUS: ${data.status.toUpperCase()}`;
+                    
+                    if (data.status === 'offline') {
+                        text.textContent = "PC companion is currently offline or sleeping.";
+                    } else if (data.status === 'listening') {
+                        text.textContent = "Companion is currently listening to voice commands...";
+                    } else if (data.status === 'thinking') {
+                        text.textContent = "Companion is processing a request...";
+                    } else if (data.status === 'speaking' && data.chat_log && data.chat_log.length > 0) {
+                        const lastMsg = data.chat_log[data.chat_log.length - 1];
+                        text.textContent = `${lastMsg.sender.toUpperCase()}: ${lastMsg.text}`;
+                    } else if (data.chat_log && data.chat_log.length > 0) {
+                        const lastMsg = data.chat_log[data.chat_log.length - 1];
+                        text.textContent = `Last active message: ${lastMsg.text}`;
+                    } else {
+                        text.textContent = "Companion connected & idle.";
+                    }
+                }
+            } catch (err) {
+                console.error("Polling error:", err);
+            }
+        }
+
+        // Initialize Polling
+        setInterval(pollDiagnostics, 1000);
+        pollDiagnostics(); // First immediate call
+    </script>
+</body>
+</html>

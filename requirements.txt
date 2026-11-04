@@ -1,0 +1,47 @@
+# MEOW Personal Assistant - Dependencies
+# Install: pip install -r requirements.txt
+
+# --- Core Framework ---
+flask>=3.0.0
+werkzeug>=3.0.0
+PySide6>=6.6.0
+
+# --- AI / LLM ---
+llama-cpp-python>=0.2.0        # Local LLaMA inference
+# kokoro-onnx                  # Optional: Kokoro TTS (install separately if needed)
+
+# --- Speech & Audio ---
+SpeechRecognition>=3.10.0
+pyttsx3>=2.90
+pygame>=2.5.0
+soundfile>=0.12.0
+
+# --- Vision & Gesture ---
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+Pillow>=10.0.0
+pyautogui>=0.9.54
+
+# --- System Control ---
+psutil>=5.9.0
+pyperclip>=1.8.0
+pygetwindow>=0.0.9
+AppOpener>=1.7
+
+# --- Web & Scraping ---
+beautifulsoup4>=4.12.0
+playwright>=1.40.0
+requests>=2.31.0
+
+# --- Document Processing ---
+pypdf>=3.17.0
+wordhoard>=5.0.0
+
+# --- Data & Utilities ---
+numpy>=1.24.0
+
+# --- Windows-Specific (install via pip on Windows only) ---
+# pywin32>=306                 # Provides win32gui, win32com, win32clipboard, etc.
+# pywin32 is required but may need manual installation:
+#   pip install pywin32
+#   python Scripts/pywin32_postinstall.py -install

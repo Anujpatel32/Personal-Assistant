@@ -1,39 +1,40 @@
-from flask import Flask, render_template, request, jsonify
-import speech_recognition as sr
-import webbrowser
-import pyttsx3
-import pythoncom
-import random
-import urllib.request
-import urllib.parse
-import xml.etree.ElementTree as ET
-import re
+
+from flask import Flask, render_template, request, jsonify, make_response, Response
+import json
+import hashlib
 import os
-import threading
-import time
-import queue
-import html as html_module
-
-import musicLibrary
-import memory_manager
-from llama_cpp import Llama
-import psutil
-import platform
 import sys
+import threading
+import copy
+import urllib.parse
+import memory_manager
+import knowledge_manager
+try:
+    import gesture_control
+except Exception as _ge_err:
+    print(f"[WARN] Gesture control unavailable: {_ge_err}")
+    gesture_control = None
+import accessibility
+from werkzeug.utils import secure_filename
 
-if hasattr(sys.stdout, 'reconfigure'):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except Exception:
-        pass
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+app = Flask(__name__, template_folder=os.path.join(BASE_DIR, "templates"))
+app.config["TEMPLATES_AUTO_RELOAD"] = True   # always serve latest index.html
 
-app = Flask(__name__)
+# Ensure RAG documents dir exists
+knowledge_manager.ensure_dirs()
 
-# --- GLOBAL STATE ---
+# --- GLOBAL STATE (SHARED WITH COMPANION) ---
 assistant_state = {
     "status": "offline",
-    "chat_log": [],
+    "mood": "neutral",
+    "chat_log": memory_manager.load_chat_history(),
     "display_data": None,
+    "music_status": {
+        "playing": False,
+        "title": "No playlist playing",
+        "source": ""
+    },
     "pc_stats": {
         "cpu": 0.0,
         "ram": 0.0,
@@ -52,477 +53,214 @@ assistant_state = {
     }
 }
 state_lock = threading.Lock()
-llm_lock = threading.Lock()
-speech_lock = threading.Lock()
 active_mode = False
 stop_speaking_flag = False
-engine = None
-speaking_active = False
-last_speech_time = 0.0
+active_engine = None
+active_engine_lock = threading.Lock()
 
-def get_gpu_stats():
-    return memory_manager.get_gpu_stats()
+# Reference to the mascot widget, set by companion.py on startup
+mascot_widget_ref = None
 
-def update_pc_stats_worker():
-    # Warm up CPU measurement
-    psutil.cpu_percent(interval=None)
-    while True:
-        try:
-            cpu = psutil.cpu_percent(interval=None)
-            ram_mem = psutil.virtual_memory()
-            ram_pct = ram_mem.percent
-            ram_used = round(ram_mem.used / (1024 ** 3), 2)
-            ram_total = round(ram_mem.total / (1024 ** 3), 2)
-            
-            disk_mem = psutil.disk_usage('/')
-            disk_pct = disk_mem.percent
-            
-            battery = psutil.sensors_battery()
-            battery_pct = battery.percent if battery else None
-            battery_plugged = battery.power_plugged if battery else None
-            
-            processes = len(psutil.pids())
-            os_name = f"{platform.system()} {platform.release()}"
-            
-            gpu_data = get_gpu_stats()
-            
-            with state_lock:
-                assistant_state["pc_stats"] = {
-                    "cpu": cpu,
-                    "ram": ram_pct,
-                    "ram_used_gb": ram_used,
-                    "ram_total_gb": ram_total,
-                    "disk": disk_pct,
-                    "battery": battery_pct,
-                    "battery_plugged": battery_plugged,
-                    "processes": processes,
-                    "os": os_name,
-                    "gpu": gpu_data["gpu"],
-                    "gpu_mem_used": gpu_data["gpu_mem_used"],
-                    "gpu_mem_total": gpu_data["gpu_mem_total"],
-                    "gpu_mem_pct": gpu_data["gpu_mem_pct"],
-                    "gpu_name": gpu_data["gpu_name"]
-                }
-        except Exception as e:
-            print(f"[PC STATS ERROR]: {e}")
-        time.sleep(3)
+# --- GESTURE CONTROL BACKEND STATE ---
+gesture_running = False
+gesture_thread = None
 
-recognizer = sr.Recognizer()
-llm = Llama(
-    model_path="tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
-    n_ctx=1024,
-    n_threads=6,
-    n_batch=512
-)
-SYSTEM = (
-    "ROLE & IDENTITY: You are the AI assistant named MARK. The user is a human speaking to you. You are speaking to the user. Under no circumstances should you ever think you are the user, or that the user is named Mark. You are a witty, warm, and friendly AI assistant — like a mix of Jarvis and a cool best friend.\n\n"
-    "CRITICAL RULES:\n"
-    "1. IDENTITY: You are Mark. Under no circumstances should you ever call yourself by any other name, such as Sarah or anything else. You are an AI personal assistant, NOT a customer support representative. Never talk about 'our product' or 'our support'.\n"
-    "2. GREETING: If you know the user's name (from the facts below), you MUST greet them by their name naturally in your response.\n"
-    "3. PERSONALIZATION: You MUST use the learned facts, preferences, and recent context about the user listed below to personalize your answers. Reference them casually in conversation whenever appropriate.\n"
-    "4. CONVERSATIONAL STYLE: Keep your replies short (1-3 sentences) since you are a voice assistant. Be confident, slightly sarcastic when appropriate, warm, and genuinely fun to talk to. Never sound robotic.\n"
-    "5. NO PREAMBLE: Answer the user's question directly and immediately. Under no circumstances should you include any conversational filler, meta-commentary, or introductory remarks such as 'Sure, here is a response...', 'Sure, I can help with that', or 'Based on the context...'. Start with the actual answer right away."
-)
-
-def append_chat(text, sender="assistant"):
-    with state_lock:
-        assistant_state["chat_log"].append({"text": text, "sender": sender})
-
-
-def speak(text, wait=True):
-    """Speak text synchronously using a fresh engine to prevent SAPI5 leaks."""
-    global engine, speaking_active, last_speech_time, stop_speaking_flag
+# --- GLOBAL WINDOWS MEDIA MONITOR ---
+def get_current_media_info():
+    import win32gui
+    import win32process
+    import psutil
     
-    append_chat(text, "assistant")
-    print(f"[MARK SAYS]: {text}")
+    media_info = None
     
-    stop_speaking_flag = False
-    speaking_active = True
-    assistant_state["status"] = "speaking"
-    
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    
-    try:
-        pythoncom.CoInitialize()
-        with speech_lock:
-            engine = pyttsx3.init()
-            
-            # Optimize speaking properties for Mark (Jarvis-like feel)
-            engine.setProperty('rate', 175)   # deliberate, premium pacing
-            engine.setProperty('volume', 1.0)  # full clarity
-            
-            # Explicitly look for Microsoft David (Standard English Male voice)
+    def enum_windows_callback(hwnd, extra):
+        nonlocal media_info
+        if media_info:
+            return
+        if win32gui.IsWindowVisible(hwnd):
+            title = win32gui.GetWindowText(hwnd).strip()
+            if not title:
+                return
             try:
-                voices = engine.getProperty('voices')
-                male_voice = None
-                # Standard SAPI5 search
-                for v in voices:
-                    if "david" in v.name.lower():
-                        male_voice = v.id
-                        break
-                # Gender fallback
-                if not male_voice:
-                    for v in voices:
-                        if "male" in getattr(v, 'gender', '').lower():
-                            male_voice = v.id
-                            break
-                if male_voice:
-                    engine.setProperty('voice', male_voice)
-            except Exception as ve:
-                print(f"[VOICE SELECTION ERROR]: {ve}")
-
-            for sentence in sentences:
-                if stop_speaking_flag:
-                    break
-                sentence_str = sentence.strip()
-                if not sentence_str:
-                    continue
-                engine.say(sentence_str)
-                engine.runAndWait()
-    except Exception as e:
-        print(f"[SPEECH ERROR]: {e}")
-    finally:
-        speaking_active = False
-        last_speech_time = time.time()
-        engine = None
-        if active_mode:
-            assistant_state["status"] = "listening"
-        else:
-            assistant_state["status"] = "offline"
-
-
-def listen_once(source, timeout=3, phrase_limit=5):
-    """Listen once from an open mic source."""
-    try:
-        audio = recognizer.listen(source, timeout=timeout, phrase_time_limit=phrase_limit)
-        text = recognizer.recognize_google(audio, language='en-in').lower()
-        print(f"[HEARD]: {text}")
-        return text
-    except sr.WaitTimeoutError:
-        return ""
-    except Exception:
-        return ""
-
-
-def make_embed_url(url):
-    """Convert any YouTube URL to an embeddable URL."""
-    video_id = None
-    if "youtu.be/" in url:
-        video_id = url.split("youtu.be/")[1].split("?")[0].split("&")[0]
-    elif "watch?v=" in url:
-        video_id = url.split("watch?v=")[1].split("&")[0]
-    if video_id:
-        return f"https://www.youtube-nocookie.com/embed/{video_id}?autoplay=1"
-    return url
-
-
-# --- COMMAND PROCESSING ---
-def process_command(command, mic_source):
-    global active_mode, stop_speaking_flag
-    assistant_state["status"] = "thinking"
-
-    try:
-        try:
-            # Intercept memory/learning commands first
-            mem_response = memory_manager.handle_memory_commands(command)
-            if mem_response is not None:
-                speak(mem_response)
-                return
-
-            if "news" in command:
-                topic = command.replace("news", "").replace("about", "").replace("of", "").replace("related", "").replace("show", "").replace("me", "").strip()
-                if not topic: topic = "latest"
-                append_chat(f"Fetching news about {topic}", "assistant")
-                url = f"https://news.google.com/rss/search?q={urllib.parse.quote(topic)}"
-                try:
-                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                    xml_data = urllib.request.urlopen(req).read()
-                    root = ET.fromstring(xml_data)
-                    items = root.findall('.//item')
-                    if not items:
-                        speak("I couldn't find any news.")
-                        return
-                    video_id = ""
-                    try:
-                        yt_req = urllib.request.Request(
-                            f"https://www.youtube.com/results?search_query={urllib.parse.quote(topic + ' news')}",
-                            headers={'User-Agent': 'Mozilla/5.0'}
-                        )
-                        yt_html = urllib.request.urlopen(yt_req).read().decode()
-                        video_ids = re.findall(r"watch\?v=([a-zA-Z0-9_-]{11})", yt_html)
-                        if video_ids: video_id = video_ids[0]
-                    except Exception: pass
-                    articles_html = ""
-                    for item in items[:5]:
-                        title_text = html_module.escape(item.find('title').text or '')
-                        articles_html += f"<div class='article'><h3>{title_text}</h3></div>"
-                    # Show dashboard FIRST
-                    assistant_state["display_data"] = {"type": "news", "topic": topic, "video_id": video_id, "articles_html": articles_html}
-                    speak(f"Here are the top news headlines for {topic}")
-                    for item in items[:3]:
-                        if stop_speaking_flag:
-                            break
-                        speak(item.find('title').text)
-                except Exception as e:
-                    print(f"[NEWS ERROR]: {e}")
-                    speak("Sorry, an error occurred while fetching news.")
-
-            elif "play" in command:
-                on_youtube = "on youtube" in command
-                query = command.replace("play", "").replace("on youtube", "").strip()
-                if not query or query in ["music", "some music", "a song", "random music"]:
-                    song = random.choice(list(musicLibrary.music.values()))
-                    if on_youtube:
-                        speak("Playing random music on YouTube")
-                        webbrowser.open_new_tab(song)
-                    else:
-                        embed_url = make_embed_url(song)
-                        assistant_state["display_data"] = {"type": "youtube", "url": embed_url}
-                        speak("Playing random music")
-                    return
-                for key in musicLibrary.music:
-                    if key in query:
-                        song_url = musicLibrary.music[key]
-                        if on_youtube:
-                            speak(f"Playing {key} on YouTube")
-                            webbrowser.open_new_tab(song_url)
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                proc = psutil.Process(pid)
+                pname = proc.name().lower()
+                
+                # Spotify check
+                if "spotify" in pname:
+                    if title not in ["Spotify", "Spotify Free", "Spotify Premium", "Spotify Helper"]:
+                        parts = title.split(" - ", 1)
+                        if len(parts) == 2:
+                            media_info = {
+                                "playing": True,
+                                "artist": parts[0].strip(),
+                                "title": parts[1].strip()
+                            }
                         else:
-                            embed_url = make_embed_url(song_url)
-                            assistant_state["display_data"] = {"type": "youtube", "url": embed_url}
-                            speak(f"Playing {key}")
-                        return
-                append_chat(f"Searching for {query} on YouTube", "assistant")
-                try:
-                    search_req = urllib.request.Request(
-                        f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}",
-                        headers={'User-Agent': 'Mozilla/5.0'}
-                    )
-                    html = urllib.request.urlopen(search_req).read().decode()
-                    video_ids = re.findall(r"watch\?v=([a-zA-Z0-9_-]{11})", html)
-                    if video_ids:
-                        vid = video_ids[0]
-                        if on_youtube:
-                            speak(f"Playing {query} on YouTube")
-                            webbrowser.open_new_tab(f"https://www.youtube.com/watch?v={vid}")
-                        else:
-                            embed_url = f"https://www.youtube-nocookie.com/embed/{vid}?autoplay=1"
-                            assistant_state["display_data"] = {"type": "youtube", "url": embed_url}
-                            speak(f"Playing {query}")
-                    else:
-                        speak("Sorry, I couldn't find that on YouTube.")
-                except Exception as e:
-                    print(f"[YT ERROR]: {e}")
-                    speak("Sorry, an error occurred searching YouTube.")
-
-            elif "sleep" in command or "offline" in command:
-                active_mode = False
-                assistant_state["display_data"] = None
-                speak("Going offline. Say hey mark to wake me up.")
-                assistant_state["status"] = "offline"
-                return
-
-            elif "shutdown" in command:
-                active_mode = False
-                assistant_state["display_data"] = None
-                assistant_state["chat_log"] = []
-                speak("Shutting down. Goodbye Boss!")
-                assistant_state["status"] = "offline"
-                return
-
-            elif any(kw in command for kw in ["send message", "send a message", "text", "message on", "msg"]):
-                # Detect which app
-                app_target = ""
-                if "whatsapp" in command:
-                    app_target = "whatsapp"
-                elif "instagram" in command:
-                    app_target = "instagram"
-                else:
-                    speak("Which app do you want to message on? WhatsApp or Instagram?")
-                    assistant_state["status"] = "listening"
-                    app_reply = listen_once(mic_source, timeout=5, phrase_limit=5)
-                    if app_reply:
-                        append_chat(app_reply, "user")
-                    if app_reply and "whatsapp" in app_reply:
-                        app_target = "whatsapp"
-                    elif app_reply and "instagram" in app_reply:
-                        app_target = "instagram"
-                    else:
-                        speak("Sorry, I can only send messages on WhatsApp or Instagram right now.")
-                        return
-
-                # Ask for contact name
-                speak("Who do you want to message?")
-                assistant_state["status"] = "listening"
-                contact = listen_once(mic_source, timeout=5, phrase_limit=7)
-                if contact:
-                    append_chat(contact, "user")
-                if not contact:
-                    speak("I didn't catch the name. Please try again.")
-                    return
-
-                # Ask for message content
-                speak(f"What would you like to say to {contact}?")
-                assistant_state["status"] = "listening"
-                message = listen_once(mic_source, timeout=8, phrase_limit=15)
-                if message:
-                    append_chat(message, "user")
-                if not message:
-                    speak("I didn't catch the message. Please try again.")
-                    return
-
-                encoded_msg = urllib.parse.quote(message)
-
-                if app_target == "whatsapp":
-                    # Open WhatsApp with the message pre-filled
-                    # Uses WhatsApp's URL scheme — opens search for the contact
-                    speak(f"Opening WhatsApp to send a message to {contact}")
-                    wa_url = f"https://wa.me/?text={encoded_msg}"
-                    webbrowser.open_new_tab(wa_url)
-                    speak(f"I've opened WhatsApp with your message. Please select {contact} and hit send.")
-
-                elif app_target == "instagram":
-                    # Instagram doesn't support direct message via URL, so open the profile search
-                    speak(f"Opening Instagram to message {contact}")
-                    ig_url = f"https://www.instagram.com/{urllib.parse.quote(contact.replace(' ', ''))}/"
-                    webbrowser.open_new_tab(ig_url)
-                    speak(f"I've opened {contact}'s Instagram profile. You can send them a DM from there.")
-
-            elif "open" in command:
-                assistant_state["display_data"] = None
-                app_name = command.replace("open app", "").replace("open", "").strip()
-                if not app_name:
-                    return
-                try:
-                    from AppOpener import open as app_open
-                    speak(f"Opening {app_name}")
-                    app_open(app_name, match_closest=True, throw_error=True)
-                except Exception:
-                    fallback_protocols = {
-                        "whatsapp": "whatsapp:", "spotify": "spotify:",
-                        "settings": "ms-settings:", "calculator": "calculator:"
-                    }
-                    launched = False
-                    for key, protocol in fallback_protocols.items():
-                        if key in app_name.lower():
-                            os.startfile(protocol)
-                            speak(f"Opened {app_name}")
-                            launched = True
-                            break
-                    if not launched:
-                        speak(f"Sorry, {app_name} is not present in your system.")
-                        speak("Would you like me to redirect you to download it?")
-                        assistant_state["status"] = "listening"
-                        response = listen_once(mic_source, timeout=5, phrase_limit=5)
-                        if response:
-                            append_chat(response, "user")
-                        affirm = ["yes", "yeah", "sure", "ok", "okay", "yup", "download", "do it"]
-                        if response and any(w in response for w in affirm):
-                            speak("Opening Microsoft Store.")
-                            os.startfile(f'ms-windows-store://search/?query={urllib.parse.quote(app_name)}')
-                        else:
-                            speak("Okay, skipping download.")
-
-            else:
-                # Casual / general conversation via LLM
-                assistant_state["display_data"] = None
-                try:
-                    system_prompt = SYSTEM + memory_manager.get_system_prompt_addition()
-                    prompt = f"<|system|>\n{system_prompt}</s>\n<|user|>\n{command}</s>\n<|assistant|>\n"
-                    is_code_request = any(w in command.lower() for w in ["code", "program", "write a", "script", "function", "java", "python", "c++", "c#", "javascript", "html", "css", "class", "implement", "how to write", "code to"])
-                    max_tokens = 384 if is_code_request else 100
-                    with llm_lock:
-                        output = llm(
-                            prompt,
-                            max_tokens=max_tokens,
-                            temperature=0.7,
-                            top_p=0.9,
-                            repeat_penalty=1.1,
-                            stop=["</s>", "<|user|>", "<|system|>"]
-                        )
-                    response = output["choices"][0]["text"].strip()
-                    if response:
-                        speak(response)
-                    else:
-                        speak("Hmm, I'm not sure what to say to that.")
-                except Exception as e:
-                    print(f"[LLM ERROR]: {e}")
-                    speak("I encountered an error thinking about that.")
-        except Exception as e:
-            print(f"[PROCESS COMMAND ERROR]: {e}")
-            speak("Sorry, I encountered an error executing that command.")
-    finally:
-        # Trigger background memory extraction after handling the command
-        memory_manager.extract_memory_in_background(command, llm, llm_lock)
-        if active_mode:
-            assistant_state["status"] = "listening"
-
-
-# --- BACKGROUND LISTENER ---
-def assistant_engine():
-    global active_mode, stop_speaking_flag, speaking_active, last_speech_time
-    pythoncom.CoInitialize()
-
-    try:
-        source = sr.Microphone()
-        with source:
-            recognizer.adjust_for_ambient_noise(source, duration=1)
-        print("[ENGINE] Microphone initialized successfully. Listening for wake word 'hey mark'...")
-    except Exception as e:
-        print(f"[MICROPHONE ERROR]: Could not access microphone: {e}")
-        # Keep background thread alive without crashing Flask
-        while True:
-            assistant_state["status"] = "offline"
-            time.sleep(2)
-
-    with source:
-        while True:
-            # Wait while speech is playing or during 1.5s post-speech cooldown
-            if speaking_active or (time.time() - last_speech_time < 1.5):
-                time.sleep(0.2)
-                continue
-
-            if active_mode:
-                assistant_state["status"] = "listening"
-
-            # Check again right before listening starts
-            if speaking_active or (time.time() - last_speech_time < 1.5):
-                time.sleep(0.2)
-                continue
-
-            command = listen_once(source, timeout=2, phrase_limit=7)
-
-            # Discard microphone input if speaking starts during or right after listening
-            if speaking_active or (time.time() - last_speech_time < 1.5):
-                print("[ENGINE] Ignored microphone command to prevent feedback during speech/cooldown.")
-                continue
-
-            if not command:
-                continue
-
-            if not active_mode:
-                if "mark" in command:
-                    active_mode = True
-                    append_chat(command, "user")
-                    speak("Yes boss?")
-                    assistant_state["status"] = "listening"
-                continue
-
-            append_chat(command, "user")
-            process_command(command, source)
-
+                            media_info = {
+                                "playing": True,
+                                "artist": "Spotify",
+                                "title": title
+                            }
+                # YouTube browser check
+                elif any(b in pname for b in ["chrome", "msedge", "firefox", "opera", "brave"]):
+                    if "youtube" in title.lower() and " - youtube" in title.lower():
+                        cleaned = title
+                        for tag in [" - Google Chrome", " - Microsoft Edge", " - Mozilla Firefox", " - Brave", " - Opera"]:
+                            cleaned = cleaned.replace(tag, "")
+                        cleaned = cleaned.replace(" - YouTube", "").replace("YouTube - ", "")
+                        
+                        artist = "YouTube"
+                        song_title = cleaned
+                        if " - " in cleaned:
+                            parts = cleaned.split(" - ", 1)
+                            artist = parts[0].strip()
+                            song_title = parts[1].strip()
+                        
+                        media_info = {
+                            "playing": True,
+                            "artist": artist,
+                            "title": song_title
+                        }
+                # VLC check
+                elif "vlc" in pname:
+                    if title != "VLC media player" and " - VLC media player" in title:
+                        cleaned = title.replace(" - VLC media player", "")
+                        artist = "VLC Player"
+                        song_title = cleaned
+                        if " - " in cleaned:
+                            parts = cleaned.split(" - ", 1)
+                            artist = parts[0].strip()
+                            song_title = parts[1].strip()
+                        
+                        media_info = {
+                            "playing": True,
+                            "artist": artist,
+                            "title": song_title
+                        }
+            except Exception:
+                pass
+                
+    win32gui.EnumWindows(enum_windows_callback, None)
+    return media_info
 
 # --- API Routes ---
 @app.route('/')
 def index():
-    return render_template('index.html')
+    resp = make_response(render_template('index.html', local_ip=get_local_ip()))
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma']        = 'no-cache'
+    resp.headers['Expires']       = '0'
+    return resp
 
 @app.route('/api/state', methods=['GET'])
 def get_state():
+    state_snapshot = _build_state_snapshot()
+    # ETag short-circuit: skip JSON re-parse if nothing changed
+    state_json = json.dumps(state_snapshot, sort_keys=True, default=str)
+    etag = hashlib.md5(state_json.encode()).hexdigest()
+    if request.headers.get("If-None-Match") == etag:
+        return "", 304
+    response = make_response(state_json, 200)
+    response.headers["Content-Type"] = "application/json"
+    response.headers["ETag"] = etag
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+# --- Server-Sent Events state stream (replaces 500ms polling) ---
+def _build_state_snapshot():
+    """Build and return the state dict (reused by both /api/state and /api/events)."""
+    media_info = get_current_media_info()
     with state_lock:
-        import copy
-        state_snapshot = copy.deepcopy(assistant_state)
-    state_snapshot["tasks"] = memory_manager.load_tasks()
-    return jsonify(state_snapshot)
+        if media_info:
+            assistant_state["music_status"] = media_info
+        else:
+            assistant_state["music_status"] = {
+                "playing": False,
+                "title": "No media playing",
+                "artist": "Windows Media"
+            }
+        snapshot = copy.deepcopy(assistant_state)
+    snapshot["tasks"]           = memory_manager.load_tasks()
+    snapshot["config"]          = memory_manager.load_config()
+    snapshot["gesture_running"] = gesture_control._active if gesture_control else False
+    snapshot["gesture_preview"] = gesture_control.get_preview_state() if gesture_control else False
+    # Include live mood data
+    try:
+        import emotion_engine as _em
+        snapshot["mood"]       = _em.current_mood()
+        snapshot["mood_index"] = _em.get_mood_index()
+        snapshot["mood_color"] = _em.get_mood_color()
+    except Exception:
+        pass
+    # Include active agent plan progress
+    snapshot["agent_plan"] = assistant_state.get("agent_plan", None)
+    return snapshot
+
+@app.route('/api/events')
+def api_events():
+    """SSE stream: pushes state updates only when something changes."""
+    import time
+
+    def event_stream():
+        last_etag = None
+        while True:
+            try:
+                snapshot  = _build_state_snapshot()
+                payload   = json.dumps(snapshot, sort_keys=True, default=str)
+                etag      = hashlib.md5(payload.encode()).hexdigest()
+                if etag != last_etag:
+                    last_etag = etag
+                    yield f"data: {payload}\n\n"
+                else:
+                    yield ": keep-alive\n\n"  # prevent proxy timeout
+            except GeneratorExit:
+                break
+            except Exception as e:
+                yield f"data: {{\"error\": \"{e}\"}}\n\n"
+            time.sleep(0.8)  # push at most ~1.25 updates/s
+
+    return Response(
+        event_stream(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive"
+        }
+    )
+
+# --- MEMORY BROWSER ---
+@app.route('/api/memory', methods=['GET'])
+def api_get_memory():
+    """Return facts and entities from long-term memory."""
+    mem = memory_manager.load_memory()
+    return jsonify({
+        "name":     mem.get("name", ""),
+        "facts":    mem.get("facts", []),
+        "entities": mem.get("entities", []),
+    })
+
+@app.route('/api/memory/facts/<int:idx>', methods=['DELETE'])
+def api_delete_fact(idx):
+    """Delete a fact by index."""
+    mem = memory_manager.load_memory()
+    facts = mem.get("facts", [])
+    if 0 <= idx < len(facts):
+        facts.pop(idx)
+        mem["facts"] = facts
+        memory_manager.save_memory(mem)
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": "Index out of range"}), 404
+
+@app.route('/api/memory/entities/<entity_id>', methods=['DELETE'])
+def api_delete_entity(entity_id):
+    """Delete an entity by its id field."""
+    mem = memory_manager.load_memory()
+    entities = mem.get("entities", [])
+    mem["entities"] = [e for e in entities if e.get("id") != entity_id]
+    memory_manager.save_memory(mem)
+    return jsonify({"success": True})
 
 @app.route('/api/tasks', methods=['GET'])
 def api_get_tasks():
@@ -554,29 +292,575 @@ def api_toggle_task(task_id):
 @app.route('/api/wake', methods=['POST'])
 def wake_up():
     global active_mode
-    with state_lock:
-        active_mode = True
-        assistant_state["status"] = "listening"
-    speak("Yes boss?", wait=True)
+    active_mode = True
+    if mascot_widget_ref is not None:
+        try:
+            # Emit the signal thread-safely to trigger wake up in PySide6 GUI thread
+            mascot_widget_ref.web_wake_trigger.emit()
+        except Exception as e:
+            print(f"[WAKE ERROR]: {e}")
     return jsonify({"success": True})
 
 @app.route('/api/stop', methods=['POST'])
 def api_stop():
-    global stop_speaking_flag, engine
+    global stop_speaking_flag
     stop_speaking_flag = True
-    if engine is not None:
+    if mascot_widget_ref is not None:
         try:
-            engine.stop()
+            mascot_widget_ref.interrupt_speech()
         except Exception as e:
-            print(f"[STOP ERROR]: {e}")
+            print(f"[API STOP MASCOT ERROR]: {e}")
     return jsonify({"success": True})
 
 
-if __name__ == "__main__":
-    # Start PC diagnostics worker thread
-    threading.Thread(target=update_pc_stats_worker, daemon=True).start()
-    # Start the listener AFTER everything is initialized
-    threading.Thread(target=assistant_engine, daemon=True).start()
-    print("Starting Web Dashboard on http://127.0.0.1:5000")
-    webbrowser.open_new_tab("http://127.0.0.1:5000")
-    app.run(port=5000, threaded=True, debug=False)
+@app.route('/api/command', methods=['POST'])
+def api_command():
+    data = request.json or {}
+    command = data.get("command", "").strip()
+    if command and mascot_widget_ref is not None:
+        try:
+            mascot_widget_ref.trigger_remote_command(command)
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+    return jsonify({"success": False, "error": "Invalid command or mascot offline"})
+
+@app.route('/api/media/control', methods=['POST'])
+def api_media_control():
+    data = request.json or {}
+    action = data.get("action", "")
+    try:
+        import pyautogui
+        if action == "play" or action == "pause":
+            pyautogui.press('playpause')
+        elif action == "next":
+            pyautogui.press('nexttrack')
+        elif action == "prev":
+            pyautogui.press('prevtrack')
+        elif action == "stop":
+            pyautogui.press('stop')
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/api/config', methods=['POST'])
+def api_save_config():
+    data = request.json or {}
+    selected_model = data.get("selected_model", "llama")
+    gemini_api_key = data.get("gemini_api_key", "")
+    groq_api_key = data.get("groq_api_key", "")
+    nvidia_api_key = data.get("nvidia_api_key", "")
+    openrouter_api_key = data.get("openrouter_api_key", "")
+    selected_tts = data.get("selected_tts", "sapi")
+    elevenlabs_api_key = data.get("elevenlabs_api_key", "")
+    elevenlabs_voice_id = data.get("elevenlabs_voice_id", "21m00Tcm4TlvDq8ikWAM")
+    kokoro_voice = data.get("kokoro_voice", "af_sarah")
+    kokoro_voice_mix = data.get("kokoro_voice_mix", {})
+    
+    memory_manager.save_config(
+        selected_model, gemini_api_key, groq_api_key, nvidia_api_key, openrouter_api_key,
+        selected_tts=selected_tts, elevenlabs_api_key=elevenlabs_api_key, elevenlabs_voice_id=elevenlabs_voice_id, kokoro_voice=kokoro_voice,
+        kokoro_voice_mix=kokoro_voice_mix
+    )
+    
+    if mascot_widget_ref is not None:
+        try:
+            mascot_widget_ref.sync_menu_trigger.emit()
+        except Exception as e:
+            print(f"[CONFIG SYNC ERROR]: {e}")
+            
+    return jsonify({"success": True})
+
+def set_gesture_control_state(enable):
+    global gesture_running, gesture_thread
+    import time
+    if not gesture_control:
+        return False, "Gesture control is not supported (missing cv2/mediapipe)."
+    if enable:
+        if not gesture_control._active:
+            gesture_running = True
+            gesture_thread = threading.Thread(target=gesture_control.start_capture_loop, daemon=True)
+            gesture_thread.start()
+            # Wait for thread to attempt to open camera
+            time.sleep(0.4)
+            if not gesture_control._active:
+                gesture_running = False
+                return False, "I was unable to open the webcam. Ensure it is connected and not in use."
+            print("[APP] Started gesture control capture thread")
+            return True, "Gesture control activated"
+        return True, "Gesture control already active"
+    else:
+        if gesture_control._active or gesture_running:
+            gesture_control.stop_capture_loop()
+            gesture_running = False
+            if gesture_thread:
+                gesture_thread.join(timeout=1.0)
+            print("[APP] Stopped gesture control capture thread")
+            return True, "Gesture control deactivated"
+        return True, "Gesture control not active"
+
+@app.route('/api/gesture/status', methods=['GET'])
+def get_gesture_status():
+    global gesture_running
+    gesture_running = gesture_control._active if gesture_control else False
+    return jsonify({"running": gesture_running})
+
+@app.route('/api/gesture/toggle', methods=['POST'])
+def toggle_gesture_control():
+    data = request.json or {}
+    enable = data.get("enable", False)
+    success, msg = set_gesture_control_state(enable)
+    return jsonify({"success": success, "message": msg})
+
+@app.route('/api/gesture/preview', methods=['POST'])
+def toggle_gesture_preview():
+    if not gesture_control or not gesture_control._active:
+        return jsonify({"success": False, "message": "Gesture control is not running. Enable it first."})
+    new_state = gesture_control.toggle_preview()
+    return jsonify({"success": True, "preview": new_state})
+
+# --- AUTOSTART ---
+@app.route('/api/startup', methods=['GET'])
+def get_startup_status():
+    """Returns whether Meow is registered in Windows startup registry."""
+    enabled = accessibility.get_startup_status()
+    return jsonify({"enabled": enabled})
+
+@app.route('/api/startup', methods=['POST'])
+def set_startup_status():
+    """Enables or disables Meow autostart via Windows registry."""
+    data = request.json or {}
+    enable = bool(data.get("enable", False))
+    msg = accessibility.configure_startup(enable=enable)
+    return jsonify({"success": True, "enabled": enable, "message": msg})
+
+# --- ROUTINES CONFIG ---
+@app.route('/api/routines/config', methods=['GET'])
+def api_get_routines_config():
+    """Return current morning/night routine configuration."""
+    import automation_control
+    return jsonify(automation_control.load_routines_config())
+
+@app.route('/api/routines/config', methods=['POST'])
+def api_save_routines_config():
+    """Save morning/night routine configuration."""
+    import automation_control
+    data = request.json or {}
+    ok = automation_control.save_routines_config(data)
+    return jsonify({"success": ok})
+
+@app.route('/api/routines/morning/run', methods=['POST'])
+def api_run_morning_routine():
+    """Manually trigger the morning routine."""
+    import automation_control
+    try:
+        speech = automation_control.run_good_morning_routine()
+        # Speak it via the assistant if speak_fn is available
+        speak_fn = getattr(mascot_widget_ref, '_speak_async', None) if mascot_widget_ref else None
+        if speak_fn:
+            import threading
+            threading.Thread(target=speak_fn, args=(speech,), daemon=True).start()
+        return jsonify({"success": True, "speech": speech})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/routines/night/run', methods=['POST'])
+def api_run_night_routine():
+    """Manually trigger the night routine."""
+    import automation_control
+    try:
+        speech = automation_control.run_night_routine()
+        speak_fn = getattr(mascot_widget_ref, '_speak_async', None) if mascot_widget_ref else None
+        if speak_fn:
+            import threading
+            threading.Thread(target=speak_fn, args=(speech,), daemon=True).start()
+        return jsonify({"success": True, "speech": speech})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# --- VISION INTELLIGENCE ---
+@app.route('/api/vision/describe', methods=['POST'])
+def api_vision_describe():
+    """Screenshot the active window and describe it with Gemini Vision."""
+    import vision_control, llm_router, threading
+    screenshot_path = os.path.join(os.path.dirname(__file__), "vision_temp_describe.jpg")
+    try:
+        vision_control.capture_active_window(screenshot_path)
+        mem = memory_manager.load_memory()
+        api_key = mem.get("gemini_api_key", "")
+        if not api_key:
+            return jsonify({"success": False, "error": "Gemini API key not configured"}), 400
+
+        prompt = (
+            "Describe ONLY what is literally visible in this screenshot. "
+            "List the main application/window, visible file names, any open panels or tabs, "
+            "and any text content you can read. "
+            "If there is an error message, quote it exactly. "
+            "CRITICAL: Do NOT invent, assume, or add any banners, warnings, or status messages "
+            "that are not clearly visible in the image. Stick strictly to what you can see."
+        )
+        description = llm_router.call_gemini(
+            api_key=api_key,
+            system_prompt="You are a vision assistant describing screen content. Only describe what is literally visible. Never hallucinate or infer content that isn't clearly shown.",
+            history=[],
+            prompt=prompt,
+            max_tokens=200,
+            image_path=screenshot_path
+        )
+        # Speak it
+        if mascot_widget_ref:
+            _speak = getattr(mascot_widget_ref, '_speak_async_fn', None)
+            if _speak:
+                threading.Thread(target=_speak, args=(description,), daemon=True).start()
+
+        return jsonify({"success": True, "description": description})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        try:
+            if os.path.exists(screenshot_path):
+                os.remove(screenshot_path)
+        except Exception:
+            pass
+
+@app.route('/api/vision/read', methods=['POST'])
+def api_vision_read():
+    """OCR the active window and return clean text."""
+    import screen_memory as _sm
+    import vision_control
+    screenshot_path = os.path.join(os.path.dirname(__file__), "vision_temp_read.png")
+    try:
+        vision_control.capture_active_window(screenshot_path)
+        ocr_text = _sm.perform_windows_ocr(screenshot_path)
+        return jsonify({"success": True, "text": ocr_text or "(No text detected)"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        try:
+            if os.path.exists(screenshot_path):
+                os.remove(screenshot_path)
+        except Exception:
+            pass
+
+@app.route('/api/vision/camera', methods=['POST'])
+def api_vision_camera():
+    """One-shot webcam capture → Gemini Vision description → speak."""
+    import vision_control, llm_router, threading
+    webcam_path = os.path.join(os.path.dirname(__file__), "vision_temp_cam.jpg")
+    try:
+        success = vision_control.capture_webcam_frame(webcam_path)
+        if not success:
+            return jsonify({"success": False, "error": "Could not open webcam"}), 500
+
+        mem = memory_manager.load_memory()
+        api_key = mem.get("gemini_api_key", "")
+        if not api_key:
+            return jsonify({"success": False, "error": "Gemini API key not configured"}), 400
+
+        prompt = "Describe what you see in front of the camera in detail. Focus on people, objects, setting, and any text visible. Be concise but accurate."
+        description = llm_router.call_gemini(
+            api_key=api_key,
+            system_prompt="You are a vision assistant describing what a webcam sees.",
+            history=[],
+            prompt=prompt,
+            max_tokens=250,
+            image_path=webcam_path
+        )
+        if mascot_widget_ref:
+            _speak = getattr(mascot_widget_ref, '_speak_async_fn', None)
+            if _speak:
+                threading.Thread(target=_speak, args=(description,), daemon=True).start()
+
+        return jsonify({"success": True, "description": description})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        try:
+            if os.path.exists(webcam_path):
+                os.remove(webcam_path)
+        except Exception:
+            pass
+
+@app.route('/api/vision/last_screen', methods=['GET'])
+def api_vision_last_screen():
+    """Return the most recent screen memory entry for the HUD widget."""
+    import screen_memory as _sm
+    entries = _sm.load_screen_index()
+    if not entries:
+        return jsonify({"success": True, "entry": None})
+    latest = max(entries, key=lambda e: e.get("timestamp", 0))
+    return jsonify({
+        "success": True,
+        "entry": {
+            "window_title": latest.get("window_title", "Unknown"),
+            "text":         latest.get("text", "")[:400],
+            "timestamp":    latest.get("timestamp", 0),
+        }
+    })
+
+# --- WINDOW MANAGER ---
+@app.route('/api/windows', methods=['GET'])
+def api_list_windows():
+    """Return list of visible windows: [{title, process, pid}]."""
+    import pc_control as _pc
+    wins = _pc.list_open_windows()
+    # Strip hwnd (not JSON-serialisable in all contexts) before sending
+    clean = [{"title": w["title"], "process": w["process"], "pid": w["pid"]} for w in wins]
+    return jsonify({"success": True, "windows": clean})
+
+@app.route('/api/windows/focus', methods=['POST'])
+def api_focus_window():
+    """Bring a window matching title to the foreground."""
+    import pc_control as _pc
+    data = request.json or {}
+    title = data.get("title", "")
+    if not title:
+        return jsonify({"success": False, "error": "No title provided"}), 400
+    result = _pc.switch_to_window(title)
+    return jsonify({"success": True, "message": result})
+
+@app.route('/api/windows/close', methods=['POST'])
+def api_close_window():
+    """Close an app by window title match."""
+    import pc_control as _pc
+    data = request.json or {}
+    title = data.get("title", "")
+    if not title:
+        return jsonify({"success": False, "error": "No title provided"}), 400
+    result = _pc.close_app_by_name(title)
+    return jsonify({"success": True, "message": result})
+
+@app.route('/api/windows/focus_mode', methods=['POST'])
+def api_focus_mode():
+    """Enable or disable focus mode."""
+    import pc_control as _pc
+    data = request.json or {}
+    enable = bool(data.get("enable", True))
+    result = _pc.enable_focus_mode() if enable else _pc.disable_focus_mode()
+    return jsonify({"success": True, "message": result})
+
+# --- VOICE PERSONALITY ---
+@app.route('/api/voice/style', methods=['GET'])
+def api_get_voice_style():
+    """Return the currently active voice style."""
+    import voice_personality
+    return jsonify({"success": True, "style": voice_personality.get_active_style()})
+
+@app.route('/api/voice/style', methods=['POST'])
+def api_set_voice_style():
+    """Set the active voice style (casual / concise / professional)."""
+    import voice_personality
+    data = request.json or {}
+    style = data.get("style", "casual")
+    msg = voice_personality.set_active_style(style)
+    return jsonify({"success": True, "style": style, "message": msg})
+
+@app.route('/api/documents', methods=['GET'])
+def api_get_documents():
+    return jsonify(knowledge_manager.list_documents())
+
+@app.route('/api/documents', methods=['POST'])
+def api_upload_document():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    
+    if file:
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(knowledge_manager.DOCUMENTS_DIR, filename)
+        file.save(filepath)
+        
+        success = knowledge_manager.index_document(filepath, filename)
+        if success:
+            return jsonify({"success": True, "filename": filename}), 201
+        else:
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except Exception:
+                    pass
+            return jsonify({"error": "Failed to extract text or index file"}), 422
+
+@app.route('/api/documents/<filename>', methods=['DELETE'])
+def api_delete_document(filename):
+    safe_filename = secure_filename(filename)
+    if not safe_filename:
+        return jsonify({"error": "Invalid filename"}), 400
+    success = knowledge_manager.delete_document_index(safe_filename)
+    if success:
+        return jsonify({"success": True})
+    return jsonify({"error": "Document not found or delete failed"}), 404
+
+def get_local_ip():
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+# --- MOBILE COMPANION APP ENDPOINTS ---
+@app.route('/mobile')
+def mobile_dashboard():
+    return render_template('mobile.html', local_ip=get_local_ip())
+
+@app.route('/api/mobile/command', methods=['POST'])
+def api_mobile_command():
+    data = request.json or {}
+    command = data.get("command", "").strip()
+    if not command:
+        return jsonify({"error": "Empty command"}), 400
+    
+    if mascot_widget_ref is not None:
+        try:
+            mascot_widget_ref.trigger_remote_command(command)
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    return jsonify({"error": "Desktop companion widget is not running."}), 503
+
+@app.route('/api/mobile/clipboard', methods=['GET', 'POST'])
+def api_mobile_clipboard():
+    import pyperclip
+    if request.method == 'POST':
+        data = request.json or {}
+        text = data.get("text", "")
+        try:
+            pyperclip.copy(text)
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    else:
+        try:
+            text = pyperclip.paste()
+            return jsonify({"text": text})
+        except Exception as e:
+            return jsonify({"text": "", "error": str(e)})
+
+@app.route('/api/mobile/control', methods=['POST'])
+def api_mobile_control():
+    data = request.json or {}
+    action = data.get("action", "")
+    value = data.get("value")
+    
+    import pc_control
+    import pyautogui
+    try:
+        if action == "volume" and value is not None:
+            pc_control.set_volume_percentage(int(value))
+        elif action == "brightness" and value is not None:
+            pc_control.set_brightness(int(value))
+        elif action == "play_pause":
+            pyautogui.press("playpause")
+        elif action == "prev":
+            pyautogui.press("prevtrack")
+        elif action == "next":
+            pyautogui.press("nexttrack")
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- PLUGIN MARKETPLACE ENDPOINTS ---
+@app.route('/api/plugins', methods=['GET'])
+def api_get_plugins():
+    import plugin_manager
+    installed = plugin_manager.get_installed_plugins()
+    # Format catalog metadata
+    catalog = []
+    for plugin_id, details in plugin_manager.COMMUNITY_CATALOG.items():
+        is_installed = any(p["id"] == plugin_id for p in installed)
+        catalog.append({
+            "id": plugin_id,
+            "name": details["name"],
+            "description": details["description"],
+            "version": details["version"],
+            "installed": is_installed
+        })
+    return jsonify({
+        "installed": installed,
+        "catalog": catalog
+    })
+
+@app.route('/api/plugins/install', methods=['POST'])
+def api_install_plugin():
+    data = request.json or {}
+    plugin_id = data.get("id", "").strip()
+    
+    import plugin_manager
+    if plugin_id not in plugin_manager.COMMUNITY_CATALOG:
+        return jsonify({"error": "Plugin not found in community catalog"}), 404
+        
+    details = plugin_manager.COMMUNITY_CATALOG[plugin_id]
+    file_path = os.path.join(plugin_manager.PLUGINS_DIR, f"{plugin_id}.py")
+    
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(details["code"])
+            
+        import pc_control
+        success = plugin_manager.hot_load_plugin(plugin_id, mascot_widget_ref, app, pc_control)
+        if success:
+            return jsonify({"success": True})
+        else:
+            return jsonify({"error": "Plugin file written but hot-load failed."}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/plugins/toggle', methods=['POST'])
+def api_toggle_plugin():
+    data = request.json or {}
+    plugin_id = data.get("id", "").strip()
+    active = data.get("active")
+    
+    import plugin_manager
+    installed = [p["id"] for p in plugin_manager.get_installed_plugins()]
+    if plugin_id not in installed:
+        return jsonify({"error": "Plugin not installed"}), 404
+            
+    plugin_manager.plugin_status[plugin_id] = bool(active)
+    plugin_manager.save_status()
+    
+    import pc_control
+    if active:
+        plugin_manager.hot_load_plugin(plugin_id, mascot_widget_ref, app, pc_control)
+    else:
+        plugin_manager.unload_plugin(plugin_id)
+        
+    return jsonify({"success": True})
+
+# --- AUTONOMOUS TASK QUEUE ENDPOINTS ---
+@app.route('/api/queue', methods=['GET'])
+def api_get_queue():
+    import queue_manager
+    return jsonify(queue_manager.get_queue())
+
+@app.route('/api/queue', methods=['POST'])
+def api_add_queue_task():
+    data = request.json or {}
+    command = data.get("command", "").strip()
+    schedule_type = data.get("schedule_type", "once")
+    interval = data.get("interval", 60)
+    max_retries = data.get("max_retries", 3)
+    
+    if not command:
+        return jsonify({"error": "Command string is required."}), 400
+        
+    import queue_manager
+    try:
+        task_id = queue_manager.add_task(command, schedule_type, interval, max_retries)
+        return jsonify({"success": True, "id": task_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/queue/<task_id>', methods=['DELETE'])
+def api_cancel_queue_task(task_id):
+    import queue_manager
+    success = queue_manager.cancel_task(task_id)
+    if success:
+        return jsonify({"success": True})
+    return jsonify({"error": "Task not found or cancellation failed."}), 404

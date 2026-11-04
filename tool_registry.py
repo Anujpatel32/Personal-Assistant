@@ -262,4 +262,127 @@ def _tool_install_dep(package_name: str, package_manager: str = "pip"):
     return code_builder.tool_install_package(package_name, package_manager)
 
 
+# -- File Operations -------------------------------------------------------
+@register_tool("read_file",
+               "Read the contents of a file and return the text",
+               ["file_path"])
+def _tool_read_file(file_path: str):
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        if len(content) > 3000:
+            return content[:3000] + f"\n... (truncated, total {len(content)} chars)"
+        return content
+    except Exception as e:
+        return f"Error reading file: {e}"
+
+
+@register_tool("write_file",
+               "Write text content to a file (creates or overwrites)",
+               ["file_path", "content"])
+def _tool_write_file(file_path: str, content: str):
+    import os
+    os.makedirs(os.path.dirname(file_path) or ".", exist_ok=True)
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return f"Written {len(content)} chars to {file_path}"
+
+
+@register_tool("run_command",
+               "Execute a shell command and return the stdout/stderr output",
+               ["command"])
+def _tool_run_command(command: str):
+    import subprocess
+    try:
+        result = subprocess.run(
+            command, shell=True, capture_output=True, text=True,
+            timeout=30, errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        output = result.stdout.strip()
+        if result.stderr.strip():
+            output += f"\nSTDERR: {result.stderr.strip()}"
+        if not output:
+            output = f"Command exited with code {result.returncode}"
+        return output[:2000]
+    except subprocess.TimeoutExpired:
+        return "Command timed out after 30 seconds"
+    except Exception as e:
+        return f"Command failed: {e}"
+
+
+# -- Clipboard --------------------------------------------------------------
+@register_tool("copy_to_clipboard",
+               "Copy text to the system clipboard",
+               ["text"])
+def _tool_copy_clipboard(text: str):
+    import pyperclip
+    pyperclip.copy(text)
+    return f"Copied {len(text)} chars to clipboard"
+
+
+@register_tool("get_clipboard",
+               "Read the current contents of the system clipboard",
+               [])
+def _tool_get_clipboard():
+    import pyperclip
+    content = pyperclip.paste()
+    return content[:2000] if content else "(clipboard is empty)"
+
+
+# -- Music -------------------------------------------------------------------
+@register_tool("play_music",
+               "Play a music playlist by name (liked, old, english, refreshing) or random",
+               ["playlist"])
+def _tool_play_music(playlist: str = "random"):
+    import webbrowser
+    import random
+    import musicLibrary
+    playlist_lower = playlist.lower().strip()
+    if playlist_lower in musicLibrary.music:
+        webbrowser.open_new_tab(musicLibrary.music[playlist_lower])
+        return f"Playing {playlist_lower} playlist"
+    else:
+        song = random.choice(list(musicLibrary.music.values()))
+        webbrowser.open_new_tab(song)
+        return "Playing random music"
+
+
+# -- Timer -------------------------------------------------------------------
+@register_tool("set_timer",
+               "Set a countdown timer for a given number of seconds",
+               ["seconds", "label"])
+def _tool_set_timer(seconds: int, label: str = "Timer"):
+    import threading
+    import winsound
+
+    def _timer_done():
+        try:
+            winsound.Beep(1000, 500)
+            winsound.Beep(1000, 500)
+        except Exception:
+            pass
+
+    seconds = int(seconds)
+    threading.Timer(seconds, _timer_done).start()
+    minutes = seconds // 60
+    secs = seconds % 60
+    if minutes > 0:
+        return f"Timer set: {label} - {minutes}m {secs}s"
+    return f"Timer set: {label} - {secs}s"
+
+
+# -- Weather -----------------------------------------------------------------
+@register_tool("get_weather",
+               "Get current weather for a city",
+               ["city"])
+def _tool_get_weather(city: str = "Pune"):
+    import memory_manager
+    try:
+        weather = memory_manager.fetch_weather(city)
+        return weather if weather else f"Could not fetch weather for {city}"
+    except Exception as e:
+        return f"Weather error: {e}"
+
+
 logger.info("Loaded %d tools: %s", len(_REGISTRY), ', '.join(_REGISTRY.keys()))

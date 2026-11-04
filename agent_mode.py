@@ -6,7 +6,11 @@ import urllib.parse
 import csv
 from bs4 import BeautifulSoup
 
-import companion
+import llm_router
+
+import logging
+logger = logging.getLogger("meow.tools")
+
 
 def get_desktop_path():
     # Prioritize original/local desktop (non-OneDrive)
@@ -30,8 +34,7 @@ def search_duckduckgo(query, max_results=5):
     url = "https://html.duckduckgo.com/html/"
     params = urllib.parse.urlencode({"q": query})
     full_url = f"{url}?{params}"
-    print(f"[AGENT SEARCH] Querying DuckDuckGo: '{query}'")
-    
+    logger.info(f"[AGENT SEARCH] Querying DuckDuckGo: '{query}'")
     try:
         req = urllib.request.Request(
             full_url,
@@ -66,11 +69,11 @@ def search_duckduckgo(query, max_results=5):
                 })
         return results
     except Exception as e:
-        print(f"[AGENT SEARCH ERROR] DuckDuckGo search failed: {e}")
+        logger.error(f"[AGENT SEARCH ERROR] DuckDuckGo search failed: {e}")
         return []
 
 def scrape_url_text(url, max_chars=3000):
-    print(f"[AGENT SCRAPER] Reading text from: {url}")
+    logger.info(f"[AGENT SCRAPER] Reading text from: {url}")
     try:
         req = urllib.request.Request(
             url,
@@ -93,7 +96,7 @@ def scrape_url_text(url, max_chars=3000):
         text = re.sub(r'\s+', ' ', text).strip()
         return text[:max_chars]
     except Exception as e:
-        print(f"[AGENT SCRAPER WARNING] Could not scrape {url}: {e}")
+        logger.warning(f"[AGENT SCRAPER WARNING] Could not scrape {url}: {e}")
         return ""
 
 def run_agent_flow(goal, api_key, model_type="nvidia", progress_callback=None):
@@ -104,9 +107,9 @@ def run_agent_flow(goal, api_key, model_type="nvidia", progress_callback=None):
     
     # Generate search queries using LLM
     if model_type == "gemini":
-        planner_resp = companion.call_gemini(api_key, system_prompt, [], f"User goal: {goal}", max_tokens=100)
+        planner_resp = llm_router.call_gemini(api_key, system_prompt, [], f"User goal: {goal}", max_tokens=100)
     else:
-        planner_resp = companion.call_nvidia(api_key, system_prompt, [], f"User goal: {goal}", max_tokens=100)
+        planner_resp = llm_router.call_nvidia(api_key, system_prompt, [], f"User goal: {goal}", max_tokens=100)
         
     queries = []
     for q in planner_resp.split("\n"):
@@ -172,9 +175,9 @@ def run_agent_flow(goal, api_key, model_type="nvidia", progress_callback=None):
     system_prompt = "You compile and format structured research CSV reports. Output only valid CSV."
     
     if model_type == "gemini":
-        csv_output = companion.call_gemini(api_key, system_prompt, [], shortlist_prompt, max_tokens=1000)
+        csv_output = llm_router.call_gemini(api_key, system_prompt, [], shortlist_prompt, max_tokens=1000)
     else:
-        csv_output = companion.call_nvidia(api_key, system_prompt, [], shortlist_prompt, max_tokens=1000)
+        csv_output = llm_router.call_nvidia(api_key, system_prompt, [], shortlist_prompt, max_tokens=1000)
         
     # Clean up CSV block
     csv_lines = [line.strip() for line in csv_output.split("\n") if line.strip()]
@@ -193,8 +196,8 @@ def run_agent_flow(goal, api_key, model_type="nvidia", progress_callback=None):
         with open(report_path, "w", encoding="utf-8-sig", newline="") as f:
             f.write(csv_text)
             
-        print(f"[AGENT] Saved report successfully to: {report_path}")
+        logger.info(f"[AGENT] Saved report successfully to: {report_path}")
         return f"Research agent complete, Boss! I have searched the web, shortlisted the matches, and saved a compiled spreadsheet named 'agent_report.csv' on your Desktop."
     except Exception as e:
-        print(f"[AGENT ERROR] Failed to save CSV: {e}")
+        logger.error(f"[AGENT ERROR] Failed to save CSV: {e}")
         return f"Research complete, but I encountered an error writing the CSV file to your Desktop: {e}"

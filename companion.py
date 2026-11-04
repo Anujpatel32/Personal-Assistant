@@ -1,6 +1,12 @@
 import sys
 import time
 
+import logging
+from config.logging_config import setup_logging
+setup_logging()
+logger = logging.getLogger("meow.core")
+
+
 # Check for --startup argument to delay execution, allowing Windows boot to finish smoothly
 if "--startup" in sys.argv:
     time.sleep(10)  # Reduced from 30s — enough for Windows to finish booting
@@ -15,31 +21,13 @@ try:
         ctypes.windll.user32.ShowWindow(hwnd, 0) # SW_HIDE = 0
 except Exception:
     pass
-import math
-import re
 import threading
-import queue
-import webbrowser
 import json
-import ssl
-import urllib.request
-import urllib.parse
-import urllib.error
-import base64
-import psutil
-import pyautogui
 
-from PySide6.QtCore import Qt, QThread, QTimer, Signal, Slot, QPoint, QPointF, QRect, QRectF
-from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont, QCursor, QIcon, QAction, QPainterPath, QLinearGradient, QRadialGradient
-from PySide6.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QMenu, QProgressBar, QTextEdit
+from PySide6.QtWidgets import QApplication
 
 import memory_manager
-import knowledge_manager
-import pc_control
-import musicLibrary
 import app as flask_app
-import studio_launcher
-import screen_memory
 import tts_engine as _tts_mod
 _tts_mod.init_tts(flask_app)
 
@@ -48,7 +36,7 @@ try:
     import emotion_engine
     emotion_engine.load_mood()
 except Exception as _ee:
-    print(f"[EMOTION] Could not load emotion engine: {_ee}")
+    logger.info(f"[EMOTION] Could not load emotion engine: {_ee}")
     emotion_engine = None
 
 # Proactive intelligence engine — init with speak_async and weather provider
@@ -59,8 +47,7 @@ try:
         get_weather_fn=lambda: cached_weather
     )
 except Exception as _pe:
-    print(f"[PROACTIVE] Could not init proactive engine: {_pe}")
-
+    logger.info(f"[PROACTIVE] Could not init proactive engine: {_pe}")
 # Agentic action planner — wire flask_app + speak references
 try:
     import action_planner
@@ -69,8 +56,7 @@ try:
         speak_fn   = lambda text: speak_async(text)
     )
 except Exception as _ap:
-    print(f"[PLANNER] Could not init action planner: {_ap}")
-
+    logger.info(f"[PLANNER] Could not init action planner: {_ap}")
 # --- CONSTANTS & CONFIG ---
 SYSTEM = (
     "ROLE & IDENTITY: You are the AI assistant named MEOW (pronounced Me-ow). The user is Anuj, a human speaking to you. Under no circumstances should you think you are the user. You are a witty, warm, and friendly AI assistant — like a mix of Jarvis and a cool best friend.\n\n"
@@ -136,12 +122,9 @@ def append_chat(text, sender="assistant", is_stream=False):
 
 
 # ---------------------------------------------------------------------------
-# TTS ENGINE — all speech synthesis delegated to tts_engine.py
+# TTS ENGINE — speech synthesis delegated to tts_engine.py
 # ---------------------------------------------------------------------------
-tts_engine = _tts_mod  # alias so shim functions below can reference tts_engine.*
-
-def clean_text_for_tts(text):
-    return tts_engine.clean_text_for_tts(text)
+tts_engine = _tts_mod
 
 def speak_sync_global(text, on_start_speaking=None):
     tts_engine.speak_sync_global(text, on_start_speaking=on_start_speaking)
@@ -149,52 +132,10 @@ def speak_sync_global(text, on_start_speaking=None):
 def speak_async(text):
     tts_engine.speak_async(text)
 
-def play_sapi(text, on_start_speaking=None):
-    tts_engine.play_sapi(text, on_start_speaking=on_start_speaking)
-
-def play_audio_file(file_path, on_start_speaking=None):
-    tts_engine.play_audio_file(file_path, on_start_speaking=on_start_speaking)
-
 # ---------------------------------------------------------------------------
-# LLM ROUTER — all cloud API calls delegated to llm_router.py
+# LLM ROUTER — all cloud API calls via llm_router.py (no wrappers needed)
 # ---------------------------------------------------------------------------
 import llm_router
-
-def call_gemini(api_key, system_prompt, history, prompt, max_tokens=150, image_path=None):
-    return llm_router.call_gemini(api_key, system_prompt, history, prompt, max_tokens, image_path)
-
-def call_groq(api_key, system_prompt, history, prompt, max_tokens=150):
-    return llm_router.call_groq(api_key, system_prompt, history, prompt, max_tokens)
-
-def call_nvidia(api_key, system_prompt, history, prompt, max_tokens=150, image_path=None):
-    return llm_router.call_nvidia(api_key, system_prompt, history, prompt, max_tokens, image_path)
-
-def call_openrouter(api_key, system_prompt, history, prompt, max_tokens=150):
-    return llm_router.call_openrouter(api_key, system_prompt, history, prompt, max_tokens)
-
-def call_gemini_stream(api_key, system_prompt, history, prompt, max_tokens=150, image_path=None):
-    yield from llm_router.call_gemini_stream(api_key, system_prompt, history, prompt, max_tokens, image_path)
-
-def call_groq_stream(api_key, system_prompt, history, prompt, max_tokens=150):
-    yield from llm_router.call_groq_stream(api_key, system_prompt, history, prompt, max_tokens)
-
-def call_nvidia_stream(api_key, system_prompt, history, prompt, max_tokens=150, image_path=None):
-    yield from llm_router.call_nvidia_stream(api_key, system_prompt, history, prompt, max_tokens, image_path)
-
-def call_openrouter_stream(api_key, system_prompt, history, prompt, max_tokens=150):
-    yield from llm_router.call_openrouter_stream(api_key, system_prompt, history, prompt, max_tokens)
-
-def _ensure_llm_loaded():
-    llm_router._ensure_llm_loaded()
-
-def _unload_llm_if_needed(model):
-    llm_router._unload_llm_if_needed(model)
-
-def query_llm_stream(prompt, system_prompt, history=[], max_tokens=150, image_path=None):
-    yield from llm_router.query_llm_stream(prompt, system_prompt, history, max_tokens, image_path)
-
-def query_llm(prompt, system_prompt, history=[], max_tokens=150, image_path=None):
-    return llm_router.query_llm(prompt, system_prompt, history, max_tokens, image_path)
 
 # ---------------------------------------------------------------------------
 # VOICE THREAD — SpeechQueueWorker & VoiceAssistantThread in voice_thread.py
@@ -239,17 +180,17 @@ if __name__ == "__main__":
         mascot.show()
 
         # Start Flask Dashboard server thread
-        print(f"[COMPANION] Starting Flask Web Dashboard server on http://{flask_app.get_local_ip()}:5005...")
+        logger.info(f"[COMPANION] Starting Flask Web Dashboard server on http://{flask_app.get_local_ip()}:5005...")
         flask_thread = threading.Thread(
             target=lambda: flask_app.app.run(host="0.0.0.0", port=5005, threaded=True, debug=False, use_reloader=False),
             daemon=True
         )
         flask_thread.start()
 
-        print("[COMPANION] Mascot desktop companion & Flask server are operational.")
+        logger.info("[COMPANION] Mascot desktop companion & Flask server are operational.")
         sys.exit(qapp.exec())
     except Exception as e:
-        print("CRITICAL CRASH IN MAIN:")
+        logger.error("CRITICAL CRASH IN MAIN:")
         traceback.print_exc()
         sys.exit(1)
 

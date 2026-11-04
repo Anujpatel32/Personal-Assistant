@@ -6,6 +6,10 @@ import os
 import re
 from playwright.sync_api import sync_playwright
 
+import logging
+logger = logging.getLogger("meow.tools")
+
+
 TRACKERS_FILE = "trackers.json"
 
 def search_web(query, num_results=5):
@@ -52,7 +56,7 @@ def search_web(query, num_results=5):
                         break
             return results
     except Exception as e:
-        print(f"[INTERNET AGENT ERROR] Search failed for query '{query}': {e}")
+        logger.error(f"[INTERNET AGENT ERROR] Search failed for query '{query}': {e}")
         return []
 
 def scrape_url(url):
@@ -184,7 +188,7 @@ def extract_price_from_json_ld(html_or_soup):
             except Exception:
                 continue
     except Exception as e:
-        print(f"[JSON-LD PARSE WARNING]: {e}")
+        logger.warning(f"[JSON-LD PARSE WARNING]: {e}")
     return None
 
 def check_price_of_url(url, selector=".price"):
@@ -222,8 +226,7 @@ def check_price_of_url(url, selector=".price"):
                     if price is not None:
                         return price
     except Exception as e:
-        print(f"[URLLIB PRICE FETCH WARNING] {e}. Falling back to Playwright...")
-
+        logger.warning(f"[URLLIB PRICE FETCH WARNING] {e}. Falling back to Playwright...")
     # Fallback to Playwright
     try:
         with sync_playwright() as p:
@@ -252,7 +255,7 @@ def check_price_of_url(url, selector=".price"):
             browser.close()
             return price
     except Exception as e:
-        print(f"[PLAYWRIGHT PRICE FETCH ERROR] Failed for {url}: {e}")
+        logger.error(f"[PLAYWRIGHT PRICE FETCH ERROR] Failed for {url}: {e}")
         return None
 
 def check_tracker_prices():
@@ -278,8 +281,7 @@ def check_tracker_prices():
                     "url": url
                 })
         else:
-            print(f"[PRICE TRACKER WARNING] Could not fetch price for: {tracker['name']}")
-            
+            logger.warning(f"[PRICE TRACKER WARNING] Could not fetch price for: {tracker['name']}")
     if updated:
         save_trackers(trackers)
         
@@ -293,16 +295,16 @@ def automate_irctc_search(source, destination):
             context = browser.new_context(viewport=None)
             page = context.new_page()
             
-            print(f"[IRCTC AUTOMATION] Navigating to IRCTC...")
+            logger.info(f"[IRCTC AUTOMATION] Navigating to IRCTC...")
             page.goto("https://www.irctc.co.in/nget/trainSearch", timeout=30000)
             
             try:
                 page.click("button:has-text('OK')", timeout=5000)
-                print("[IRCTC AUTOMATION] Closed alert popup.")
+                logger.info("[IRCTC AUTOMATION] Closed alert popup.")
             except Exception:
                 pass
                 
-            print(f"[IRCTC AUTOMATION] Entering source station: {source}...")
+            logger.info(f"[IRCTC AUTOMATION] Entering source station: {source}...")
             # Click and select "From" station autocomplete input
             from_input = page.locator("p-autocomplete[id='origin'] input")
             from_input.click()
@@ -312,7 +314,7 @@ def automate_irctc_search(source, destination):
             page.keyboard.press("ArrowDown")
             page.keyboard.press("Enter")
             
-            print(f"[IRCTC AUTOMATION] Entering destination station: {destination}...")
+            logger.info(f"[IRCTC AUTOMATION] Entering destination station: {destination}...")
             # Click and select "To" station autocomplete input
             to_input = page.locator("p-autocomplete[id='destination'] input")
             to_input.click()
@@ -322,10 +324,10 @@ def automate_irctc_search(source, destination):
             page.keyboard.press("ArrowDown")
             page.keyboard.press("Enter")
             
-            print("[IRCTC AUTOMATION] Clicking Search button...")
+            logger.info("[IRCTC AUTOMATION] Clicking Search button...")
             page.click("button[type='submit']")
             
-            print("[IRCTC AUTOMATION] Automation complete. Browser window is active for user.")
+            logger.info("[IRCTC AUTOMATION] Automation complete. Browser window is active for user.")
             for _ in range(60):
                 if page.is_closed():
                     break
@@ -336,4 +338,4 @@ def automate_irctc_search(source, destination):
             except Exception:
                 pass
     except Exception as e:
-        print(f"[IRCTC AUTOMATION ERROR]: {e}")
+        logger.error(f"[IRCTC AUTOMATION ERROR]: {e}")

@@ -3,6 +3,10 @@ import sys
 import importlib.util
 import json
 
+import logging
+logger = logging.getLogger("meow.core")
+
+
 PLUGINS_DIR = os.path.join(os.path.dirname(__file__), "plugins")
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "plugins_config.json")
 
@@ -30,8 +34,7 @@ def save_status():
         with open(CONFIG_PATH, "w") as f:
             json.dump(plugin_status, f, indent=4)
     except Exception as e:
-        print(f"[PLUGIN MANAGER CONFIG SAVE ERROR]: {e}")
-
+        logger.error(f"[PLUGIN MANAGER CONFIG SAVE ERROR]: {e}")
 def load_plugins(mascot, app, pc_control):
     """Scan and load all enabled Python plugins from the plugins/ directory."""
     load_status()
@@ -50,11 +53,11 @@ def load_plugins(mascot, app, pc_control):
             if plugin_status[plugin_id]:
                 try:
                     register_plugin_module(plugin_id, file_path, mascot, app, pc_control)
-                    print(f"[PLUGIN MANAGER] Loaded plugin: {plugin_id}")
+                    logger.info(f"[PLUGIN MANAGER] Loaded plugin: {plugin_id}")
                 except Exception as e:
-                    print(f"[PLUGIN MANAGER ERROR] Failed to load {plugin_id}: {e}")
+                    logger.error(f"[PLUGIN MANAGER ERROR] Failed to load {plugin_id}: {e}")
             else:
-                print(f"[PLUGIN MANAGER] Plugin disabled (skipped): {plugin_id}")
+                logger.info(f"[PLUGIN MANAGER] Plugin disabled (skipped): {plugin_id}")
     save_status()
 
 def register_plugin_module(plugin_id, file_path, mascot, app, pc_control):
@@ -101,10 +104,10 @@ def hot_load_plugin(plugin_id, mascot, app, pc_control):
     
     try:
         register_plugin_module(plugin_id, file_path, mascot, app, pc_control)
-        print(f"[PLUGIN MANAGER] Hot-loaded plugin: {plugin_id}")
+        logger.info(f"[PLUGIN MANAGER] Hot-loaded plugin: {plugin_id}")
         return True
     except Exception as e:
-        print(f"[PLUGIN MANAGER ERROR] Hot-load failed: {e}")
+        logger.error(f"[PLUGIN MANAGER ERROR] Hot-load failed: {e}")
         return False
 
 def unload_plugin(plugin_id):
@@ -165,10 +168,10 @@ def handle_command(command):
             try:
                 response = handler(command)
                 if response is not None:
-                    print(f"[PLUGIN INTERCEPT] Handled by {plugin_id}: '{response}'")
+                    logger.info(f"[PLUGIN INTERCEPT] Handled by {plugin_id}: '{response}'")
                     return response
             except Exception as e:
-                print(f"[PLUGIN ERROR] Handler failed for {plugin_id}: {e}")
+                logger.error(f"[PLUGIN ERROR] Handler failed for {plugin_id}: {e}")
     return None
 
 # --- COMMUNITY PLUGINS CATALOG ---
@@ -187,8 +190,7 @@ PLUGIN_VERSION = "1.1.0"
 TRIGGERS = ["crypto price", "bitcoin", "ethereum", "crypto value", "btc rate"]
 
 def register(mascot, app, pc_control):
-    print("[CRYPTO PLUGIN] Registered successfully!")
-
+    logger.info("[CRYPTO PLUGIN] Registered successfully!")
 def execute_plugin(command):
     try:
         # Query free public Coingecko API
@@ -202,7 +204,7 @@ def execute_plugin(command):
             eth = data.get("ethereum", {}).get("usd", 0)
             return f"Bitcoin is currently trading at ${btc:,} USD, and Ethereum is at ${eth:,} USD, Boss."
     except Exception as e:
-        print(f"[CRYPTO PLUGIN ERROR]: {e}")
+        logger.error(f"[CRYPTO PLUGIN ERROR]: {e}")
         return "I was unable to retrieve live cryptocurrency prices at the moment."
 
 def handle_command(command):
@@ -225,8 +227,7 @@ PLUGIN_DESCRIPTION = "Reads the latest commit logs from public repositories."
 PLUGIN_VERSION = "1.0.0"
 
 def register(mascot, app, pc_control):
-    print("[GITHUB PLUGIN] Registered successfully!")
-
+    logger.info("[GITHUB PLUGIN] Registered successfully!")
 def handle_command(command):
     if "github commit" in command.lower() or "latest commit" in command.lower():
         try:
@@ -243,7 +244,7 @@ def handle_command(command):
                     message = latest["commit"]["message"].split("\\n")[0]
                     return f"The latest commit on python cpython was by {author}: '{message}'."
         except Exception as e:
-            print(f"[GITHUB PLUGIN ERROR]: {e}")
+            logger.error(f"[GITHUB PLUGIN ERROR]: {e}")
             return "I couldn't fetch the latest commit stats from GitHub."
     return None
 """
@@ -261,8 +262,7 @@ PLUGIN_DESCRIPTION = "Announces detailed CPU hardware architectures and file cac
 PLUGIN_VERSION = "1.2.0"
 
 def register(mascot, app, pc_control):
-    print("[SYSTEM HEALTH PLUGIN] Registered successfully!")
-
+    logger.info("[SYSTEM HEALTH PLUGIN] Registered successfully!")
 def handle_command(command):
     if any(w in command.lower() for w in ["system details", "cpu health", "hardware details"]):
         cpu_cores = psutil.cpu_count(logical=False)

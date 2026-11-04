@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+
+import logging
+logger = logging.getLogger("meow.core")
+
 """
 proactive_engine.py — Proactive Intelligence for MEOW Assistant
 ================================================================
@@ -70,9 +74,7 @@ def init(speak_fn, get_weather_fn=None):
     _speak        = speak_fn
     _get_weather  = get_weather_fn
     _initialized  = True
-    print("[PROACTIVE] Proactive intelligence engine initialized.")
-
-
+    logger.info("[PROACTIVE] Proactive intelligence engine initialized.")
 def _can_nudge(nudge_type: str) -> bool:
     """Return True if enough time has passed since last nudge of this type."""
     cooldown = COOLDOWNS.get(nudge_type, 600)
@@ -85,7 +87,7 @@ def _fire(nudge_type: str, message: str):
     global _last_nudge
     if _speak:
         _last_nudge[nudge_type] = time.time()
-        print(f"[PROACTIVE] [{nudge_type.upper()}] {message}")
+        logger.info(f"[PROACTIVE] [{nudge_type.upper()}] {message}")
         threading.Thread(target=_speak, args=(message,), daemon=True).start()
 
 
@@ -198,9 +200,7 @@ def _deliver_morning_brief():
         if _speak:
             _speak(greeting)
     except Exception as e:
-        print(f"[PROACTIVE] Morning brief error: {e}")
-
-
+        logger.error(f"[PROACTIVE] Morning brief error: {e}")
 def on_user_returned(idle_seconds: float):
     """
     Call this when Anuj returns after being idle for idle_seconds.

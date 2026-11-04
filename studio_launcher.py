@@ -6,6 +6,10 @@ from PySide6.QtCore import Qt, QThread, Signal, QUrl, QEvent
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
+import logging
+logger = logging.getLogger("meow.core")
+
+
 class GlobalHotkeyThread(QThread):
     """Listens for system-wide hotkey (Ctrl+Alt+M or fallback) using Windows API."""
     hotkey_pressed = Signal()
@@ -37,14 +41,13 @@ class GlobalHotkeyThread(QThread):
             if result:
                 registered = True
                 self.active_hotkey_str = name
-                print(f"[HOTKEY] {name} registered successfully as global assistant hotkey.")
+                logger.info(f"[HOTKEY] {name} registered successfully as global assistant hotkey.")
                 break
             else:
                 err = ctypes.windll.kernel32.GetLastError()
-                print(f"[HOTKEY] {name} registration failed (error {err}). Trying next candidate...")
-
+                logger.error(f"[HOTKEY] {name} registration failed (error {err}). Trying next candidate...")
         if not registered:
-            print("[HOTKEY] Could not register global launcher hotkey — all candidates in use.")
+            logger.info("[HOTKEY] Could not register global launcher hotkey — all candidates in use.")
             return
 
         msg = wintypes.MSG()
@@ -56,7 +59,7 @@ class GlobalHotkeyThread(QThread):
                     ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
                     ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
         except Exception as e:
-            print(f"[HOTKEY ERROR] Thread crashed: {e}")
+            logger.error(f"[HOTKEY ERROR] Thread crashed: {e}")
         finally:
             ctypes.windll.user32.UnregisterHotKey(None, 1)
 

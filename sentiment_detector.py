@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+
+import logging
+logger = logging.getLogger("meow.core")
+
 """
 sentiment_detector.py — Lightweight zero-dependency sentiment scorer for MEOW
 ===============================================================================
@@ -101,4 +105,4 @@ if __name__ == "__main__":
     ]
     for t in tests:
         r = score_sentiment(t)
-        print(f"  {r['label']:8s} {r['compound']:+.3f}  '{t}'")
+        logger.info(f"  {r['label']:8s} {r['compound']:+.3f}  '{t}'")

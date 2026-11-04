@@ -1,8 +1,0 @@
-h = open('templates/index.html', encoding='utf-8-sig').read()
-print('Size:', len(h)//1024, 'KB, Lines:', h.count('\n'))
-print('tab-content CSS rules:', h.count('.tab-content {'))
-print('hud-tab:', 'id="hud-tab"' in h)
-print('tasks-tab:', 'id="tasks-tab"' in h)
-print('flex:1 in tab-content:', 'flex: 1' in h[h.find('.tab-content {'):h.find('.tab-content {')+200])
-print('overflow-y:auto:', 'overflow-y: auto' in h[h.find('.tab-content {'):h.find('.tab-content {')+200])
-print('min-height:0:', 'min-height: 0' in h[h.find('.tab-content {'):h.find('.tab-content {')+200])

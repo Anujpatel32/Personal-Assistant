@@ -18,7 +18,10 @@ Usage:
     result = run_tool("open_app", {"app": "chrome"})
 """
 
+import logging
 import traceback
+
+logger = logging.getLogger("meow.tools")
 
 # ── Registry storage ──────────────────────────────────────────────────────────
 _REGISTRY: dict = {}   # name → {description, params, fn}
@@ -70,7 +73,7 @@ def run_tool(name: str, args: dict = None) -> dict:
         return {"success": True, "output": str(result) if result is not None else "Done", "error": None}
     except Exception as e:
         tb = traceback.format_exc()
-        print(f"[TOOL REGISTRY] Tool '{name}' failed: {e}\n{tb}")
+        logger.error("Tool '%s' failed: %s\n%s", name, e, tb)
         return {"success": False, "output": "", "error": str(e)}
 
 
@@ -259,4 +262,4 @@ def _tool_install_dep(package_name: str, package_manager: str = "pip"):
     return code_builder.tool_install_package(package_name, package_manager)
 
 
-print(f"[TOOL REGISTRY] Loaded {len(_REGISTRY)} tools: {', '.join(_REGISTRY.keys())}")
+logger.info("Loaded %d tools: %s", len(_REGISTRY), ', '.join(_REGISTRY.keys()))

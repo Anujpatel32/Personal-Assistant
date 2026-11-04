@@ -79,3 +79,7 @@ Desktop.ini
 Optimize_Windows_Startup.ps1
 project_optimization_analysis.md
 coding/__pycache__/
+
+# ===== Data & Logs (user-specific) =====
+data/
+logs/

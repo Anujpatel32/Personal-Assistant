@@ -3,7 +3,11 @@ import re
 import cv2
 import pyautogui
 import time
-import companion
+import llm_router
+
+import logging
+logger = logging.getLogger("meow.vision")
+
 
 def get_desktop_path():
     try:
@@ -27,7 +31,7 @@ def capture_webcam_frame(output_path="webcam_capture.jpg"):
             break
             
     if cap is None or not cap.isOpened():
-        print("[VISION ERROR] Could not open webcam.")
+        logger.error("[VISION ERROR] Could not open webcam.")
         return False
         
     try:
@@ -40,8 +44,7 @@ def capture_webcam_frame(output_path="webcam_capture.jpg"):
             cap.release()
             return True
     except Exception as e:
-        print(f"[VISION ERROR] Camera capture failed: {e}")
-        
+        logger.error(f"[VISION ERROR] Camera capture failed: {e}")
     if cap:
         cap.release()
     return False
@@ -67,7 +70,7 @@ def count_faces_local(image_path):
         cv2.imwrite(image_path, img)
         return len(faces)
     except Exception as e:
-        print(f"[VISION ERROR] Haar Cascade face detection failed: {e}")
+        logger.error(f"[VISION ERROR] Haar Cascade face detection failed: {e}")
         return 0
 
 def capture_active_window(output_path="screen_capture.jpg"):
@@ -88,7 +91,7 @@ def capture_active_window(output_path="screen_capture.jpg"):
                 screenshot.save(output_path)
                 captured = True
     except Exception as e:
-        print(f"[VISION ERROR] Active window crop failed: {e}")
+        logger.error(f"[VISION ERROR] Active window crop failed: {e}")
     if not captured:
         try:
             pyautogui.screenshot(output_path)
@@ -106,8 +109,7 @@ def capture_active_window(output_path="screen_capture.jpg"):
                 img = cv2.resize(img, (1280, int(h * ratio)), interpolation=cv2.INTER_AREA)
             cv2.imwrite(output_path, img, [cv2.IMWRITE_JPEG_QUALITY, 50])
     except Exception as e:
-        print(f"[VISION ERROR] Compression failed: {e}")
-        
+        logger.error(f"[VISION ERROR] Compression failed: {e}")
     return True
 
 def get_active_window_ui_text():
@@ -168,7 +170,7 @@ def get_active_window_ui_text():
                 unique_lines.append(line)
         return "\n".join(unique_lines)
     except Exception as e:
-        print(f"[UI AUTOMATION ERROR]: {e}")
+        logger.error(f"[UI AUTOMATION ERROR]: {e}")
     return ""
 
 def grab_active_editor_text():
@@ -241,7 +243,7 @@ def handle_vision_command(command, api_key, system_prompt, chat_history, model_t
     is_cam = any(phrase in cmd_clean for phrase in ["you see", "see me", "look at", "look me", "camera", "webcam", "my room", "doing", "hand", "wearing", "holding"])
     
     if is_screen:
-        print(f"[VISION] Triggering Screen Capture & UI Automation Query ({model_type})...")
+        logger.info(f"[VISION] Triggering Screen Capture & UI Automation Query ({model_type})...")
         screenshot_path = "screen_capture.jpg"
         try:
             # 1. Capture cropped foreground window boundaries
@@ -250,7 +252,7 @@ def handle_vision_command(command, api_key, system_prompt, chat_history, model_t
             # 2. Query accessibility context (UIA + Clipboard grab)
             ui_text = get_active_window_ui_text()
             if not ui_text or len(ui_text.strip()) < 10:
-                print("[VISION] UI Automation returned minimal text, calling clipboard grab fallback...")
+                logger.info("[VISION] UI Automation returned minimal text, calling clipboard grab fallback...")
                 ui_text = grab_active_editor_text()
                 
             # 3. Sanitize extracted text to prevent safety-refusal false positives
@@ -263,7 +265,7 @@ def handle_vision_command(command, api_key, system_prompt, chat_history, model_t
             user_prompt += "Please review this window context along with the active window screenshot to answer the user's question accurately. If there is a code error or exception, highlight the exact description and state the line number clearly in your response."
             
             if model_type == "gemini":
-                response = companion.call_gemini(
+                response = llm_router.call_gemini(
                     api_key=api_key,
                     system_prompt=system_prompt,
                     history=chat_history,
@@ -272,7 +274,7 @@ def handle_vision_command(command, api_key, system_prompt, chat_history, model_t
                     image_path=screenshot_path
                 )
             else:
-                response = companion.call_nvidia(
+                response = llm_router.call_nvidia(
                     api_key=api_key,
                     system_prompt=system_prompt,
                     history=chat_history,
@@ -286,14 +288,14 @@ def handle_vision_command(command, api_key, system_prompt, chat_history, model_t
                 
             return response
         except Exception as e:
-            print(f"[VISION ERROR] Screen Vision failed: {e}")
+            logger.error(f"[VISION ERROR] Screen Vision failed: {e}")
             if os.path.exists(screenshot_path):
                 try: os.remove(screenshot_path)
                 except Exception: pass
             return "I encountered an error trying to capture and analyze your screen."
 
     if is_cam:
-        print(f"[VISION] Triggering Webcam Capture Vision Query ({model_type})...")
+        logger.info(f"[VISION] Triggering Webcam Capture Vision Query ({model_type})...")
         webcam_path = "webcam_capture.jpg"
         
         success = capture_webcam_frame(webcam_path)
@@ -315,7 +317,7 @@ def handle_vision_command(command, api_key, system_prompt, chat_history, model_t
             user_prompt += f"{face_context}\n\n(CRITICAL INSTRUCTION: Describe ONLY what is physically visible in front of the camera. Do not invent, assume, or guess objects based on the user facts unless they are clearly visible in the image.)"
             
             if model_type == "gemini":
-                response = companion.call_gemini(
+                response = llm_router.call_gemini(
                     api_key=api_key,
                     system_prompt=system_prompt,
                     history=chat_history,
@@ -324,7 +326,7 @@ def handle_vision_command(command, api_key, system_prompt, chat_history, model_t
                     image_path=webcam_path
                 )
             else:
-                response = companion.call_nvidia(
+                response = llm_router.call_nvidia(
                     api_key=api_key,
                     system_prompt=system_prompt,
                     history=chat_history,
@@ -339,7 +341,7 @@ def handle_vision_command(command, api_key, system_prompt, chat_history, model_t
                 
             return response
         except Exception as e:
-            print(f"[VISION ERROR] Webcam Vision failed: {e}")
+            logger.error(f"[VISION ERROR] Webcam Vision failed: {e}")
             if os.path.exists(webcam_path):
                 try: os.remove(webcam_path)
                 except Exception: pass

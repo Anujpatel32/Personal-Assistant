@@ -5,6 +5,10 @@ import time
 import threading
 import uuid
 
+import logging
+logger = logging.getLogger("meow.core")
+
+
 QUEUE_PATH = os.path.join(os.path.dirname(__file__), "task_queue.json")
 
 # Lock for thread safety
@@ -24,8 +28,7 @@ def save_queue(queue):
         with open(QUEUE_PATH, "w") as f:
             json.dump(queue, f, indent=4)
     except Exception as e:
-        print(f"[QUEUE MANAGER SAVE ERROR]: {e}")
-
+        logger.error(f"[QUEUE MANAGER SAVE ERROR]: {e}")
 def add_task(command, schedule_type, interval_seconds, max_retries=3):
     """Schedules a new autonomous task in the queue."""
     with queue_lock:
@@ -46,7 +49,7 @@ def add_task(command, schedule_type, interval_seconds, max_retries=3):
         
         queue.append(new_task)
         save_queue(queue)
-        print(f"[QUEUE MANAGER] Scheduled task {task_id}: '{command}'")
+        logger.info(f"[QUEUE MANAGER] Scheduled task {task_id}: '{command}'")
         return task_id
 
 def cancel_task(task_id):
@@ -55,7 +58,7 @@ def cancel_task(task_id):
         queue = load_queue()
         updated = [t for t in queue if t["id"] != task_id]
         save_queue(updated)
-        print(f"[QUEUE MANAGER] Cancelled task {task_id}")
+        logger.info(f"[QUEUE MANAGER] Cancelled task {task_id}")
         return len(queue) != len(updated)
 
 def get_queue():
@@ -71,7 +74,7 @@ class TaskQueueDaemon(threading.Thread):
         self.running = True
         
     def run(self):
-        print("[QUEUE DAEMON] Autonomous Task Queue Daemon started.", flush=True)
+        logger.info("[QUEUE DAEMON] Autonomous Task Queue Daemon started.", flush=True)
         while self.running:
             time.sleep(5)
             
@@ -89,7 +92,7 @@ class TaskQueueDaemon(threading.Thread):
                 
                 for task in queue:
                     if task["status"] == "pending" and task["next_run"] <= current_time:
-                        print(f"[QUEUE DAEMON] Running task {task['id']}: '{task['command']}'...")
+                        logger.info(f"[QUEUE DAEMON] Running task {task['id']}: '{task['command']}'...")
                         task["status"] = "running"
                         save_queue(queue)
                         
@@ -121,14 +124,14 @@ class TaskQueueDaemon(threading.Thread):
                                 task["status"] = "completed"
                                 
                         except Exception as e:
-                            print(f"[QUEUE DAEMON ERROR] Task {task['id']} failed: {e}")
+                            logger.error(f"[QUEUE DAEMON ERROR] Task {task['id']} failed: {e}")
                             task["retry_count"] += 1
                             if task["retry_count"] < task["max_retries"]:
                                 # Exponential backoff retry delay (30s, 60s, 120s)
                                 backoff = 30 * (2 ** task["retry_count"])
                                 task["next_run"] = time.time() + backoff
                                 task["status"] = "pending"
-                                print(f"[QUEUE DAEMON] Task {task['id']} queued for retry in {backoff} seconds (Attempt {task['retry_count']}/{task['max_retries']})")
+                                logger.info(f"[QUEUE DAEMON] Task {task['id']} queued for retry in {backoff} seconds (Attempt {task['retry_count']}/{task['max_retries']})")
                             else:
                                 task["status"] = "failed"
                                 

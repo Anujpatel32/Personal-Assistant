@@ -5,6 +5,7 @@
 flask>=3.0.0
 werkzeug>=3.0.0
 PySide6>=6.6.0
+python-dotenv>=1.0.0
 
 # --- AI / LLM ---
 llama-cpp-python>=0.2.0        # Local LLaMA inference
@@ -37,6 +38,9 @@ requests>=2.31.0
 pypdf>=3.17.0
 wordhoard>=5.0.0
 
+# --- Configuration ---
+python-dotenv>=1.0.0
+
 # --- Data & Utilities ---
 numpy>=1.24.0
 
@@ -45,3 +49,4 @@ numpy>=1.24.0
 # pywin32 is required but may need manual installation:
 #   pip install pywin32
 #   python Scripts/pywin32_postinstall.py -install
+

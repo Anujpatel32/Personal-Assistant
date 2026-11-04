@@ -11,6 +11,10 @@ import winsound
 import memory_manager
 import pc_control
 
+import logging
+logger = logging.getLogger("meow.core")
+
+
 ROUTINES_CONFIG_FILE = os.path.join(os.path.dirname(__file__), "routines_config.json")
 
 _ROUTINE_DEFAULTS = {
@@ -45,7 +49,7 @@ def load_routines_config():
             }
             return merged
     except Exception as e:
-        print(f"[ROUTINES] Could not load config: {e}")
+        logger.info(f"[ROUTINES] Could not load config: {e}")
     return dict(_ROUTINE_DEFAULTS)
 
 def save_routines_config(config: dict):
@@ -55,7 +59,7 @@ def save_routines_config(config: dict):
             json.dump(config, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
-        print(f"[ROUTINES] Could not save config: {e}")
+        logger.info(f"[ROUTINES] Could not save config: {e}")
         return False
 
 def get_top_news():
@@ -76,7 +80,7 @@ def get_top_news():
                     break
             return headlines
     except Exception as e:
-        print(f"[AUTOMATION ERROR] Could not fetch news: {e}")
+        logger.error(f"[AUTOMATION ERROR] Could not fetch news: {e}")
         return ["Could not load headlines at the moment."]
 
 def toggle_dnd(enable=True):
@@ -88,15 +92,15 @@ def toggle_dnd(enable=True):
         )
         creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
         subprocess.run(["powershell", "-NoProfile", "-Command", reg_cmd], creationflags=creationflags)
-        print(f"[AUTOMATION] Focus Assist DND state set to: {enable}")
+        logger.info(f"[AUTOMATION] Focus Assist DND state set to: {enable}")
         return True
     except Exception as e:
-        print(f"[AUTOMATION ERROR] Failed to toggle DND: {e}")
+        logger.error(f"[AUTOMATION ERROR] Failed to toggle DND: {e}")
         return False
 
 def run_good_morning_routine():
     """Build and speak the morning brief, driven by routines_config.json."""
-    print("[AUTOMATION] Running Good Morning Routine...")
+    logger.info("[AUTOMATION] Running Good Morning Routine...")
     cfg = load_routines_config().get("morning", _ROUTINE_DEFAULTS["morning"])
 
     parts = []
@@ -138,7 +142,7 @@ def run_good_morning_routine():
 
 def run_night_routine():
     """Run the night routine driven by routines_config.json."""
-    print("[AUTOMATION] Running Night Routine...")
+    logger.info("[AUTOMATION] Running Night Routine...")
     cfg = load_routines_config().get("night", _ROUTINE_DEFAULTS["night"])
 
     # Dim screen
@@ -157,12 +161,12 @@ def run_night_routine():
     )
 
 def _alarm_worker(target_hour, target_minute):
-    print(f"[ALARM] Scheduled for {target_hour:02d}:{target_minute:02d}")
+    logger.info(f"[ALARM] Scheduled for {target_hour:02d}:{target_minute:02d}")
     triggered = False
     while not triggered:
         now = time.localtime()
         if now.tm_hour == target_hour and now.tm_min == target_minute:
-            print("[ALARM] Triggering alarm sound!")
+            logger.info("[ALARM] Triggering alarm sound!")
             # Play a Windows beep sequence (3 long beeps)
             for _ in range(5):
                 winsound.Beep(880, 600)  # A5 note, 600ms
@@ -221,5 +225,5 @@ def set_alarm(time_str):
         period = "PM" if hour >= 12 else "AM"
         return f"Alarm set successfully for {am_pm_hour}:{minute:02d} {period}, Boss."
     except Exception as e:
-        print(f"[ALARM ERROR] Could not set alarm: {e}")
+        logger.error(f"[ALARM ERROR] Could not set alarm: {e}")
         return None

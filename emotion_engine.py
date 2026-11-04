@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+
+import logging
+logger = logging.getLogger("meow.core")
+
 """
 emotion_engine.py — Emotion & Personality Engine for MEOW Assistant
 =====================================================================
@@ -116,8 +120,7 @@ def _save_mood():
         }
         memory_manager.save_memory(mem)
     except Exception as e:
-        print(f"[EMOTION] Save error: {e}")
-
+        logger.error(f"[EMOTION] Save error: {e}")
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def load_mood():
@@ -146,12 +149,12 @@ def load_mood():
                 _mood_index = _clamp(saved_idx - (1 if diff > 0 else -1 if diff < 0 else 0))
                 _command_count_today = 0
 
-            print(f"[EMOTION] Loaded mood: {current_mood()} (index={_mood_index})")
+            logger.info(f"[EMOTION] Loaded mood: {current_mood()} (index={_mood_index})")
         else:
             _mood_index = MOOD_INDEX["neutral"]
-            print("[EMOTION] No saved mood — starting neutral.")
+            logger.info("[EMOTION] No saved mood — starting neutral.")
     except Exception as e:
-        print(f"[EMOTION] Load error: {e}")
+        logger.error(f"[EMOTION] Load error: {e}")
         _mood_index = MOOD_INDEX["neutral"]
 
     # Apply time-of-day baseline nudge
@@ -299,7 +302,7 @@ def _start_decay_timer():
                 idx = _mood_index
                 if idx != neutral:
                     _shift(-1 if idx > neutral else +1)
-                    print(f"[EMOTION] 30-min decay → {current_mood()}")
+                    logger.info(f"[EMOTION] 30-min decay → {current_mood()}")
                     _save_mood()
     threading.Thread(target=decay_loop, daemon=True).start()
 

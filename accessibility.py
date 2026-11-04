@@ -8,6 +8,10 @@ try:
     import win32process
     import win32con
     import win32com.client
+
+import logging
+logger = logging.getLogger("meow.core")
+
 except ImportError:
     win32gui = None
     win32process = None
@@ -58,7 +62,7 @@ def activate_window(target):
                 break
                 
     if not hwnd:
-        print(f"[ACCESSIBILITY] No window found matching: {target}")
+        logger.info(f"[ACCESSIBILITY] No window found matching: {target}")
         return False
         
     try:
@@ -73,10 +77,10 @@ def activate_window(target):
         shell.SendKeys('%') # Alt key trigger
         
         win32gui.SetForegroundWindow(hwnd)
-        print(f"[ACCESSIBILITY] Successfully activated window HWND {hwnd}")
+        logger.info(f"[ACCESSIBILITY] Successfully activated window HWND {hwnd}")
         return True
     except Exception as e:
-        print(f"[ACCESSIBILITY ERROR] SetForegroundWindow failed: {e}")
+        logger.error(f"[ACCESSIBILITY ERROR] SetForegroundWindow failed: {e}")
         # Secondary fallback
         try:
             win32gui.BringWindowToTop(hwnd)
@@ -95,17 +99,17 @@ def configure_startup(enable=True):
         if enable:
             # Save bat path in registry
             winreg.SetValueEx(key, "MeowAssistant", 0, winreg.REG_SZ, f'"{bat_path}" --startup')
-            print("[ACCESSIBILITY] Added Meow to startup registry.")
+            logger.info("[ACCESSIBILITY] Added Meow to startup registry.")
             return "Meow Assistant is configured to boot automatically on startup, Boss."
         else:
             try:
                 winreg.DeleteValue(key, "MeowAssistant")
-                print("[ACCESSIBILITY] Removed Meow from startup registry.")
+                logger.info("[ACCESSIBILITY] Removed Meow from startup registry.")
                 return "Meow Assistant was removed from startup, Boss."
             except FileNotFoundError:
                 return "Meow Assistant was not in the startup list."
     except Exception as e:
-        print(f"[ACCESSIBILITY REGISTRY ERROR] Modify failed: {e}")
+        logger.error(f"[ACCESSIBILITY REGISTRY ERROR] Modify failed: {e}")
         return f"Failed to modify startup registry: {e}"
 
 

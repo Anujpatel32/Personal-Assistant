@@ -22,10 +22,13 @@ Usage:
 """
 
 import json
+import logging
 import time
 import threading
 import types
 import traceback
+
+logger = logging.getLogger("meow.tools")
 
 import pc_control
 import accessibility
@@ -126,11 +129,11 @@ def _build_plan(goal: str) -> list:
         steps = json.loads(raw)
         if not isinstance(steps, list) or len(steps) == 0:
             raise ValueError("LLM returned empty or non-list plan")
-        print(f"[ACTION PLANNER] LLM plan ({len(steps)} steps): {[s.get('step') for s in steps]}")
+        logger.info("LLM plan (%d steps): %s", len(steps), [s.get('step') for s in steps])
         return steps
 
     except Exception as e:
-        print(f"[ACTION PLANNER] Plan generation failed: {e}")
+        logger.error("Plan generation failed: %s", e)
         return [{"step": "Could not plan task", "tool": "speak",
                  "args": {"text": f"I couldn't plan that task. Error: {str(e)[:60]}"}}]
 
@@ -151,7 +154,7 @@ def run_agentic_task(goal: str, mascot=None):
 
 
 def _agentic_worker(goal: str, mascot):
-    print(f"[ACTION PLANNER] Starting agentic task: '{goal}'")
+    logger.info("Starting agentic task: '%s'", goal)
 
     if _speak_fn:
         _speak_fn(f"Sure! Let me plan and execute: {goal[:60]}")
@@ -176,7 +179,7 @@ def _agentic_worker(goal: str, mascot):
 
         steps_state[idx]["status"] = "running"
         _set_plan_progress(steps_state, idx, "running")
-        print(f"[ACTION PLANNER] Step {idx+1}/{len(steps)}: '{step_desc}' → tool='{tool_name}' args={tool_args}")
+        logger.info("Step %d/%d: '%s' → tool='%s' args=%s", idx+1, len(steps), step_desc, tool_name, tool_args)
 
         success = False
         output  = ""
@@ -188,7 +191,7 @@ def _agentic_worker(goal: str, mascot):
                 break
             else:
                 err = result["error"]
-                print(f"[ACTION PLANNER] Attempt {attempt}/{MAX_RETRIES} failed: {err}")
+                logger.warning("Attempt %d/%d failed: %s", attempt, MAX_RETRIES, err)
                 if attempt < MAX_RETRIES:
                     time.sleep(2 ** attempt)   # exponential backoff
 
@@ -217,7 +220,7 @@ def _agentic_worker(goal: str, mascot):
         if all_success
         else f"Task finished with {done_count} successes and {failed_count} failures."
     )
-    print(f"[ACTION PLANNER] {summary}")
+    logger.info(summary)
     if _speak_fn:
         _speak_fn(summary)
 
@@ -245,7 +248,7 @@ def execute_plan(steps: list, mascot=None) -> list:
     Now also supports dict steps: {"step": "...", "tool": "...", "args": {...}}
     """
     results = []
-    print(f"[ACTION PLANNER] Executing {len(steps)} sequential steps...")
+    logger.info("Executing %d sequential steps...", len(steps))
 
     for idx, step in enumerate(steps):
         # Support both string steps and new dict-style steps
@@ -260,7 +263,7 @@ def execute_plan(steps: list, mascot=None) -> list:
         if not step:
             continue
 
-        print(f"[ACTION PLANNER] Step {idx+1}/{len(steps)}: '{step}'")
+        logger.info("Step %d/%d: '%s'", idx+1, len(steps), step)
         step_lower = step.lower()
 
         try:
@@ -294,10 +297,10 @@ def execute_plan(steps: list, mascot=None) -> list:
                     results.append(f"Step {idx+1} skipped (no mascot).")
 
         except Exception as e:
-            print(f"[ACTION PLANNER ERROR] Step {idx+1}: {e}")
+            logger.error("Step %d failed: %s", idx+1, e)
             results.append(f"Step {idx+1} failed: {e}")
 
         time.sleep(STEP_DELAY)
 
-    print(f"[ACTION PLANNER] Done. Results: {results}")
+    logger.info("Done. Results: %s", results)
     return results

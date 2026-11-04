@@ -4,6 +4,10 @@ import json
 import threading
 import math
 
+import logging
+logger = logging.getLogger("meow.memory")
+
+
 DOCUMENTS_DIR = "documents"
 INDEX_FILE = "documents_index.json"
 index_lock = threading.Lock()
@@ -20,7 +24,7 @@ def load_index():
             with open(INDEX_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            print(f"[KNOWLEDGE INDEX ERROR]: Could not load index: {e}")
+            logger.error(f"[KNOWLEDGE INDEX ERROR]: Could not load index: {e}")
             return []
 
 def save_index(index):
@@ -29,8 +33,7 @@ def save_index(index):
             with open(INDEX_FILE, "w", encoding="utf-8") as f:
                 json.dump(index, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            print(f"[KNOWLEDGE INDEX ERROR]: Could not save index: {e}")
-
+            logger.error(f"[KNOWLEDGE INDEX ERROR]: Could not save index: {e}")
 def extract_text_from_file(filepath):
     """
     Extracts text from file. Returns a list of tuples: (page_number, text)
@@ -47,7 +50,7 @@ def extract_text_from_file(filepath):
                 if text:
                     pages.append((idx + 1, text))
         except Exception as e:
-            print(f"[KNOWLEDGE PARSE ERROR]: Could not parse PDF {filepath}: {e}")
+            logger.error(f"[KNOWLEDGE PARSE ERROR]: Could not parse PDF {filepath}: {e}")
     else:
         # Standard text file parsing (.txt, .md, .py, .js, etc.)
         try:
@@ -56,8 +59,7 @@ def extract_text_from_file(filepath):
                 if content.strip():
                     pages.append((1, content))
         except Exception as e:
-            print(f"[KNOWLEDGE PARSE ERROR]: Could not read text file {filepath}: {e}")
-            
+            logger.error(f"[KNOWLEDGE PARSE ERROR]: Could not read text file {filepath}: {e}")
     return pages
 
 def chunk_document(filepath, filename, chunk_size=800, overlap=150):
@@ -119,8 +121,7 @@ def delete_document_index(filename):
         try:
             os.remove(src_path)
         except Exception as e:
-            print(f"[KNOWLEDGE FILE DELETE ERROR]: Could not remove file {src_path}: {e}")
-            
+            logger.error(f"[KNOWLEDGE FILE DELETE ERROR]: Could not remove file {src_path}: {e}")
     return len(index) < initial_len
 
 def list_documents():

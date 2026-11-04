@@ -9,6 +9,10 @@ import re
 import math
 from PIL import ImageGrab
 
+import logging
+logger = logging.getLogger("meow.vision")
+
+
 # Since pywin32 was verified as available, import it for foreground window titles
 try:
     import win32gui
@@ -43,8 +47,7 @@ def save_screen_index(index):
         with open(INDEX_PATH, "w", encoding="utf-8") as f:
             json.dump(index, f, indent=4, ensure_ascii=False)
     except Exception as e:
-        print(f"[SCREEN MEMORY SAVE ERROR]: {e}")
-
+        logger.error(f"[SCREEN MEMORY SAVE ERROR]: {e}")
 def get_active_window_title():
     if win32gui:
         try:
@@ -125,7 +128,7 @@ def perform_windows_ocr(image_path):
         )
         return res.stdout.strip()
     except Exception as e:
-        print(f"[SCREEN MEMORY OCR ERROR]: {e}")
+        logger.error(f"[SCREEN MEMORY OCR ERROR]: {e}")
         return ""
 
 
@@ -153,7 +156,7 @@ class ScreenMemoryDaemon(threading.Thread):
         self.running = True
 
     def run(self):
-        print(f"[SCREEN MEMORY DAEMON] Screen indexer running every {self.interval} seconds.", flush=True)
+        logger.info(f"[SCREEN MEMORY DAEMON] Screen indexer running every {self.interval} seconds.", flush=True)
         # Sleep initially to avoid slowing startup
         time.sleep(30)  # was 10s — give system more time to settle after boot
 
@@ -203,8 +206,7 @@ class ScreenMemoryDaemon(threading.Thread):
                         save_screen_index(index)
                         
             except Exception as e:
-                print(f"[SCREEN MEMORY DAEMON ERROR]: {e}")
-                
+                logger.error(f"[SCREEN MEMORY DAEMON ERROR]: {e}")
             time.sleep(self.interval)
 
 # --- SEARCH ENGINE (TF-IDF MATCHING) ---

@@ -47,12 +47,34 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Security, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
+from config.settings import settings
+
 logger = logging.getLogger("meow.web")
+
+# ---------------------------------------------------------------------------
+# Authentication & Security
+# ---------------------------------------------------------------------------
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+bearer_auth = HTTPBearer(auto_error=False)
+
+async def verify_auth(
+    api_key: Optional[str] = Security(api_key_header),
+    bearer: Optional[HTTPAuthorizationCredentials] = Security(bearer_auth),
+):
+    """Authenticate API requests. If MEOW_API_KEY is unset, allow all."""
+    required_key = settings.meow_api_key
+    if not required_key:
+        return True
+    token = api_key or (bearer.credentials if bearer else None)
+    if not token or token != required_key:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing API key")
+    return True
 
 # ---------------------------------------------------------------------------
 # Pydantic request/response models
@@ -285,7 +307,7 @@ async def list_tools():
     }
 
 
-@api.post("/api/v2/tools/execute", response_model=ToolExecuteResponse)
+@api.post("/api/v2/tools/execute", response_model=ToolExecuteResponse, dependencies=[Depends(verify_auth)])
 async def execute_tool(req: ToolExecuteRequest):
     """Execute a single tool by name."""
     import tool_registry
@@ -306,7 +328,7 @@ async def execute_tool(req: ToolExecuteRequest):
     )
 
 
-@api.post("/api/v2/agent/run", response_model=AgentRunResponse)
+@api.post("/api/v2/agent/run", response_model=AgentRunResponse, dependencies=[Depends(verify_auth)])
 async def run_agent(req: AgentRunRequest):
     """Run the ReAct agent executor with a natural language goal."""
     if _agent_executor is None:
@@ -362,7 +384,7 @@ async def get_config():
     return memory_manager.load_config()
 
 
-@api.post("/api/v2/config")
+@api.post("/api/v2/config", dependencies=[Depends(verify_auth)])
 async def save_config(req: ConfigUpdateRequest):
     """Save model and TTS configuration."""
     import memory_manager

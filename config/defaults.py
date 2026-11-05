@@ -36,6 +36,9 @@ DEFAULT_WEATHER_CITY = "Pune"
 DEFAULT_AVATAR_TYPE = "3d_hologram"
 DEFAULT_VOICE_STYLE = "casual"
 
+# ── Security & API Server ──────────────────────────────────────────
+DEFAULT_MEOW_API_KEY = ""
+
 # ── File / Directory Paths (relative to project root) ──────────────
 DEFAULT_DATA_DIR = "."          # memory.json etc. live in the project root
 DEFAULT_LOG_DIR = "logs"

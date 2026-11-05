@@ -43,6 +43,7 @@ from config.defaults import (
     DEFAULT_WAKE_WORD,
     DEFAULT_WEATHER_CITY,
     DEFAULT_AVATAR_TYPE,
+    DEFAULT_MEOW_API_KEY,
 )
 
 
@@ -130,6 +131,9 @@ class Settings:
         )
         self._elevenlabs_voice_id: str = self._resolve(
             "ELEVENLABS_VOICE_ID", "elevenlabs_voice_id", DEFAULT_ELEVENLABS_VOICE_ID, mem
+        )
+        self._meow_api_key: str = self._resolve(
+            "MEOW_API_KEY", "meow_api_key", DEFAULT_MEOW_API_KEY, mem
         )
 
         # ── Model / TTS selection ──────────────────────────────────
@@ -223,6 +227,10 @@ class Settings:
     @property
     def elevenlabs_voice_id(self) -> str:
         return self._elevenlabs_voice_id
+
+    @property
+    def meow_api_key(self) -> str:
+        return self._meow_api_key
 
     # ── Model / TTS ─────────────────────────────────────────────────
     @property

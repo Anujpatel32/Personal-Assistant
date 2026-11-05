@@ -288,11 +288,28 @@ def _tool_write_file(file_path: str, content: str):
     return f"Written {len(content)} chars to {file_path}"
 
 
+_BLOCKED_COMMAND_PATTERNS = [
+    r"\bformat\s+[a-zA-Z]:",
+    r"\brmdir\s+/[sq]",
+    r"\bdel\s+.*[/\\](?:windows|system32|program files)",
+    r"\bshutdown\s+/[srf]",
+    r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:",
+]
+
 @register_tool("run_command",
                "Execute a shell command and return the stdout/stderr output",
                ["command"])
 def _tool_run_command(command: str):
     import subprocess
+    import re
+
+    # Security guardrail: prevent destructive system commands
+    cmd_lower = command.lower()
+    for pattern in _BLOCKED_COMMAND_PATTERNS:
+        if re.search(pattern, cmd_lower):
+            logger.warning("Blocked potentially destructive command: %s", command)
+            return "Security violation: This command is blocked by MEOW safety guardrails."
+
     try:
         result = subprocess.run(
             command, shell=True, capture_output=True, text=True,

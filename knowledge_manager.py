@@ -7,6 +7,12 @@ import math
 import logging
 logger = logging.getLogger("meow.memory")
 
+try:
+    import vector_store
+except Exception as _vs_err:
+    logger.warning("vector_store import error: %s", _vs_err)
+    vector_store = None
+
 
 DOCUMENTS_DIR = "documents"
 INDEX_FILE = "documents_index.json"
@@ -99,16 +105,30 @@ def index_document(filepath, filename):
     new_chunks = chunk_document(filepath, filename)
     if not new_chunks:
         return False
-        
-    # 2. Append to index (removing previous index chunks for same file to prevent duplicates)
+
+    # Try ChromaDB vector store first (Phase 5)
+    if vector_store and vector_store.is_available():
+        try:
+            vector_store.index_document(filepath, filename)
+        except Exception as e:
+            logger.warning("Vector store index failed for %s: %s", filename, e)
+
+    # 2. Append to legacy JSON index as fallback
     index = load_index()
     index = [c for c in index if c["filename"] != filename]
     index.extend(new_chunks)
-    
+
     save_index(index)
     return True
 
 def delete_document_index(filename):
+    # Remove from vector store (Phase 5)
+    if vector_store and vector_store.is_available():
+        try:
+            vector_store.delete_document(filename)
+        except Exception as e:
+            logger.warning("Vector store delete failed: %s", e)
+
     # 1. Filter out chunks
     index = load_index()
     initial_len = len(index)
@@ -152,6 +172,15 @@ def list_documents():
     return docs_list
 
 def search_documents(query, limit=4):
+    # Try semantic vector search first (Phase 5)
+    if vector_store and vector_store.is_available():
+        try:
+            v_results = vector_store.search_documents(query, limit=limit)
+            if v_results:
+                return v_results
+        except Exception as e:
+            logger.warning("Vector search error: %s, falling back to TF-IDF", e)
+
     chunks = load_index()
     if not chunks or not query.strip():
         return []

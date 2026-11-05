@@ -1794,7 +1794,6 @@
                     <div class="hud-label">SELECT ACTIVE MODEL</div>
                     <select id="selected-model-select"
                         style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(0,229,255,0.3); border-radius: 6px; color: #fff; font-family: inherit; outline: none; cursor: pointer;">
-                        <option value="llama">Local LLaMA (Offline)</option>
                         <option value="gemini">Gemini 1.5 Flash (Cloud)</option>
                         <option value="groq">Groq LLaMA-3 (Cloud)</option>
                         <option value="nvidia">Nvidia LLaMA-3.1 (Cloud)</option>
@@ -3025,7 +3024,7 @@
         }
 
         async function handleSaveConfig() {
-            const selected_model = document.getElementById('selected-model-select').value;
+            const selected_model = document.getElementById('selected-model-select').value || 'gemini';
             const gemini_api_key = document.getElementById('gemini-key-input').value.trim();
             const groq_api_key = document.getElementById('groq-key-input').value.trim();
             const nvidia_api_key = document.getElementById('nvidia-key-input').value.trim();
@@ -3381,7 +3380,7 @@
 
             // --- Config (once) ---
             if (data.config && !configInitialized) {
-                document.getElementById('selected-model-select').value = data.config.selected_model;
+                document.getElementById('selected-model-select').value = ['gemini', 'groq', 'nvidia', 'openrouter'].includes(data.config.selected_model) ? data.config.selected_model : 'gemini';
                 document.getElementById('gemini-key-input').value = data.config.gemini_api_key;
                 document.getElementById('groq-key-input').value = data.config.groq_api_key;
                 document.getElementById('nvidia-key-input').value = data.config.nvidia_api_key || '';

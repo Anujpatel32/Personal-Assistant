@@ -346,7 +346,9 @@ def api_media_control():
 @app.route('/api/config', methods=['POST'])
 def api_save_config():
     data = request.json or {}
-    selected_model = data.get("selected_model", "llama")
+    selected_model = str(data.get("selected_model", "gemini")).lower().strip()
+    if selected_model not in {"gemini", "groq", "nvidia", "openrouter"}:
+        selected_model = "gemini"
     gemini_api_key = data.get("gemini_api_key", "")
     groq_api_key = data.get("groq_api_key", "")
     nvidia_api_key = data.get("nvidia_api_key", "")

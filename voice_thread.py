@@ -358,14 +358,23 @@ class VoiceAssistantThread(QThread):
                         self.active_mode = True
                         flask_app.active_mode = True
                     else:
-                        target_cmd = command.lower()
-                        if any(w in target_cmd for w in ["wake up baby", "wake up", "wake up meow", "hello meow"]):
+                        target_cmd = command.lower().strip()
+                        from config.settings import settings as _cfg_settings
+                        _configured_wake = _cfg_settings.wake_word.lower()
+                        wake_triggers = [
+                            "wake up baby", "wake up", "wake up meow", "hello meow",
+                            "hey meow", "ok meow", "meow", "hey mark", "ok mark"
+                        ]
+                        if _configured_wake:
+                            wake_triggers.extend([_configured_wake, f"hey {_configured_wake}", f"wake up {_configured_wake}"])
+
+                        if any(w in target_cmd for w in wake_triggers):
                             self.active_mode = True
                             flask_app.active_mode = True
                             self.speech_detected.emit(command)
                             self.clear_speech()
                             self.status_changed.emit("speaking")
-                            self.speech_queue.put("Hello Anuj!")
+                            self.speech_queue.put("Hello Anuj! How can I help?")
                         continue
 
                 # Active mode conversation processing

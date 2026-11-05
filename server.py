@@ -211,6 +211,14 @@ api.add_middleware(
 )
 
 
+from fastapi.staticfiles import StaticFiles
+
+# Mount static directory for PWA assets & manifests
+_static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+if os.path.exists(_static_dir):
+    api.mount("/static", StaticFiles(directory=_static_dir), name="static")
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # REST ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════════

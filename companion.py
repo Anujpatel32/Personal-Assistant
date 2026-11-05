@@ -187,6 +187,19 @@ if __name__ == "__main__":
         )
         flask_thread.start()
 
+        # Start FastAPI REST & WebSocket server (Phase 4)
+        try:
+            import server
+            server.start_background(
+                flask_app_ref=flask_app,
+                mascot_ref=mascot,
+                agent_executor_ref=_vt_mod._agent_executor,
+                port=8000
+            )
+            logger.info(f"[COMPANION] FastAPI server running on http://{flask_app.get_local_ip()}:8000 (Docs: /docs)")
+        except Exception as _fe:
+            logger.warning(f"[COMPANION] Could not start FastAPI server: {_fe}")
+
         logger.info("[COMPANION] Mascot desktop companion & Flask server are operational.")
         sys.exit(qapp.exec())
     except Exception as e:

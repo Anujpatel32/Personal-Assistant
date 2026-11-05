@@ -345,7 +345,7 @@ class MascotWidget(QWidget):
                 if isinstance(response, types.GeneratorType):
                     accumulated_text = ""
                     sentence_buffer = ""
-                    self.backend_thread.status_changed.emit("speaking")
+                    first_dispatched = False
                     
                     try:
                         for chunk in response:
@@ -355,6 +355,17 @@ class MascotWidget(QWidget):
                             sentence_buffer += chunk
                             self.backend_thread.response_generated.emit(accumulated_text, True)
                             
+                            # Fast-start: dispatch first phrase early on comma or punctuation to eliminate silence
+                            if not first_dispatched:
+                                if re.search(r'[.!?]', sentence_buffer) or (len(sentence_buffer.split()) >= 4 and re.search(r'[,;:\n]', sentence_buffer)):
+                                    parts = re.split(r'(?<=[.!?,;:\n])', sentence_buffer, maxsplit=1)
+                                    if len(parts) > 1 and parts[0].strip():
+                                        self.backend_thread.speech_queue.put(parts[0].strip())
+                                        sentence_buffer = parts[1]
+                                        first_dispatched = True
+                                        continue
+
+                            # Split completed sentences immediately upon finding punctuation
                             sentences = re.split(r'(?<=[.!?])', sentence_buffer)
                             if len(sentences) > 1:
                                 new_buffer = ""
@@ -366,6 +377,7 @@ class MascotWidget(QWidget):
                                     else:
                                         if s_clean:
                                             self.backend_thread.speech_queue.put(s_clean)
+                                            first_dispatched = True
                                 sentence_buffer = new_buffer + sentences[-1]
                     except Exception as loop_err:
                         print(f"[REMOTE GENERATOR LOOP ERROR]: {loop_err}")
@@ -455,17 +467,9 @@ class MascotWidget(QWidget):
         ground_y = 114
         
         # Calculate mouth speech / meowing animation amount
+        # Only animate mouth when audio is genuinely playing through the hardware
         meow = 0
-        is_speaking = False
-        if self.state == "speaking":
-            is_speaking = True
-        elif tts_engine._main_sapi_voice is not None:
-            try:
-                if tts_engine._main_sapi_voice.Status.RunningState == 2:
-                    is_speaking = True
-            except Exception:
-                pass
-        if is_speaking:
+        if tts_engine.is_speaking():
             meow = abs(math.sin(time.time() * 20)) * 5
 
         # 0. Draw soft ground shadow

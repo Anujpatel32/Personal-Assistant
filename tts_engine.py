@@ -116,6 +116,31 @@ def get_main_sapi_voice():
                     print(f"[MAIN SAPI VOICE INIT ERROR]: {e}", flush=True)
     return _main_sapi_voice
 
+_is_speaking_active = False
+
+def is_speaking():
+    """Returns True ONLY when speech audio is actively playing through the hardware."""
+    global _is_speaking_active
+    if _is_speaking_active:
+        return True
+    if _main_sapi_voice is not None:
+        try:
+            if _main_sapi_voice.Status.RunningState == 2:
+                return True
+        except Exception:
+            pass
+    try:
+        import pygame
+        if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+            return True
+    except Exception:
+        pass
+    return False
+
+def set_speaking_active(active: bool):
+    global _is_speaking_active
+    _is_speaking_active = bool(active)
+
 def play_sapi(text, on_start_speaking=None):
     try:
         import pythoncom
@@ -129,6 +154,7 @@ def play_sapi(text, on_start_speaking=None):
         with flask_app.active_engine_lock:
             flask_app.active_engine = voice
 
+        set_speaking_active(True)
         if on_start_speaking:
             on_start_speaking()
 
@@ -140,7 +166,7 @@ def play_sapi(text, on_start_speaking=None):
                     break
             except Exception:
                 break
-            time.sleep(0.05)
+            time.sleep(0.04)
 
         if flask_app.stop_speaking_flag:
             try:
@@ -150,6 +176,7 @@ def play_sapi(text, on_start_speaking=None):
     except Exception as e:
         print(f"[SAPI PLAY ERROR]: {e}", flush=True)
     finally:
+        set_speaking_active(False)
         with flask_app.active_engine_lock:
             flask_app.active_engine = None
 
@@ -165,6 +192,7 @@ def play_audio_file(file_path, on_start_speaking=None):
         pygame.mixer.music.load(file_path)
         flask_app.stop_speaking_flag = False
 
+        set_speaking_active(True)
         if on_start_speaking:
             on_start_speaking()
 
@@ -173,11 +201,12 @@ def play_audio_file(file_path, on_start_speaking=None):
             if flask_app.stop_speaking_flag:
                 pygame.mixer.music.stop()
                 break
-            time.sleep(0.05)
+            time.sleep(0.04)
         pygame.mixer.music.unload()
     except Exception as e:
         print(f"[AUDIO PLAY ERROR]: {e}", flush=True)
     finally:
+        set_speaking_active(False)
         try:
             if os.path.exists(file_path):
                 os.remove(file_path)

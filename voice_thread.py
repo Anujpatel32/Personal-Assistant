@@ -88,10 +88,11 @@ def init_voice_thread(app, system_prompt, speak_sync_fn, speak_async_fn):
     )
 # --- BACKEND VOICE WORKER ---
 class SpeechQueueWorker(QThread):
-    def __init__(self, speech_queue, audio_queue):
+    def __init__(self, speech_queue, audio_queue, status_callback=None):
         super().__init__()
         self.speech_queue = speech_queue
         self.audio_queue = audio_queue
+        self.status_callback = status_callback
         self.running = True
         
     def run(self):
@@ -103,6 +104,8 @@ class SpeechQueueWorker(QThread):
             import pythoncom
             pythoncom.CoInitialize()
             counter = 0
+            _cached_voice_mix = None
+            _cached_voice_param = None
             while self.running:
                 try:
                     text = self.speech_queue.get(timeout=1.0)
@@ -126,22 +129,27 @@ class SpeechQueueWorker(QThread):
                             if kokoro_voice == "custom_mix":
                                 voice_mix = config.get("kokoro_voice_mix", {})
                                 if voice_mix:
-                                    import numpy as np
-                                    blended_vector = None
-                                    total_weight = sum(voice_mix.values())
-                                    if total_weight > 0:
-                                        for v_name, weight in voice_mix.items():
-                                            normalized_weight = weight / total_weight
-                                            try:
-                                                style = kokoro.get_voice_style(v_name)
-                                                if blended_vector is None:
-                                                    blended_vector = style * normalized_weight
-                                                else:
-                                                    blended_vector += style * normalized_weight
-                                            except Exception:
-                                                pass
-                                        if blended_vector is not None:
-                                            voice_param = blended_vector
+                                    if voice_mix == _cached_voice_mix and _cached_voice_param is not None:
+                                        voice_param = _cached_voice_param
+                                    else:
+                                        import numpy as np
+                                        blended_vector = None
+                                        total_weight = sum(voice_mix.values())
+                                        if total_weight > 0:
+                                            for v_name, weight in voice_mix.items():
+                                                normalized_weight = weight / total_weight
+                                                try:
+                                                    style = kokoro.get_voice_style(v_name)
+                                                    if blended_vector is None:
+                                                        blended_vector = style * normalized_weight
+                                                    else:
+                                                        blended_vector += style * normalized_weight
+                                                except Exception:
+                                                    pass
+                                            if blended_vector is not None:
+                                                voice_param = blended_vector
+                                                _cached_voice_mix = dict(voice_mix)
+                                                _cached_voice_param = blended_vector
                             
                             samples, sample_rate = kokoro.create(
                                 text,
@@ -215,6 +223,8 @@ class SpeechQueueWorker(QThread):
         while self.running:
             try:
                 msg_type, data = self.audio_queue.get(timeout=1.0)
+                if self.status_callback:
+                    self.status_callback("speaking")
                 if msg_type == "sapi":
                     play_sapi(data)
                 elif msg_type == "file":
@@ -226,7 +236,12 @@ class SpeechQueueWorker(QThread):
                     except Exception:
                         pass
                 self.audio_queue.task_done()
+                if self.audio_queue.empty() and self.status_callback:
+                    self.status_callback("idle")
             except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"[PLAYBACK LOOP ERROR]: {e}", flush=True)
                 continue
             except Exception as e:
                 print(f"[PLAYBACK LOOP ERROR]: {e}", flush=True)
@@ -246,7 +261,11 @@ class VoiceAssistantThread(QThread):
         
         self.speech_queue = queue.Queue()
         self.audio_queue = queue.Queue()
-        self.speech_worker = SpeechQueueWorker(self.speech_queue, self.audio_queue)
+        self.speech_worker = SpeechQueueWorker(
+            self.speech_queue,
+            self.audio_queue,
+            status_callback=lambda s: self.status_changed.emit(s)
+        )
         self.speech_worker.start()
         
         # Initialize thread chat history from the persistent chat log
@@ -481,7 +500,7 @@ class VoiceAssistantThread(QThread):
                         # Real-time streaming response loop
                         accumulated_text = ""
                         sentence_buffer = ""
-                        self.status_changed.emit("speaking")
+                        first_dispatched = False
                         
                         try:
                             for chunk in response:
@@ -493,6 +512,16 @@ class VoiceAssistantThread(QThread):
                                 # Emit to UI in real-time token-by-token
                                 self.response_generated.emit(accumulated_text, True)
                                 
+                                # Fast-start: dispatch first phrase early on comma or punctuation to eliminate silence
+                                if not first_dispatched:
+                                    if re.search(r'[.!?]', sentence_buffer) or (len(sentence_buffer.split()) >= 4 and re.search(r'[,;:\n]', sentence_buffer)):
+                                        parts = re.split(r'(?<=[.!?,;:\n])', sentence_buffer, maxsplit=1)
+                                        if len(parts) > 1 and parts[0].strip():
+                                            self.speech_queue.put(parts[0].strip())
+                                            sentence_buffer = parts[1]
+                                            first_dispatched = True
+                                            continue
+
                                 # Split completed sentences immediately upon finding punctuation (excluding common abbreviations)
                                 sentences = re.split(r'(?<=[.!?])', sentence_buffer)
                                 if len(sentences) > 1:
@@ -505,6 +534,7 @@ class VoiceAssistantThread(QThread):
                                         else:
                                             if s_clean:
                                                 self.speech_queue.put(s_clean)
+                                                first_dispatched = True
                                     sentence_buffer = new_buffer + sentences[-1]
                         except Exception as loop_err:
                             print(f"[THREAD GENERATOR LOOP ERROR]: {loop_err}")

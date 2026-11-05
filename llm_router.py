@@ -627,12 +627,12 @@ def _ensure_llm_loaded():
                     model_path = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
                 from llama_cpp import Llama
                 cpu_count = os.cpu_count() or 4
-                optimal_threads = max(1, min(4, cpu_count // 2))
+                optimal_threads = max(2, min(8, cpu_count - 1 if cpu_count > 2 else cpu_count))
                 llm = Llama(
                     model_path=model_path,
                     n_ctx=1024,
                     n_threads=optimal_threads,
-                    n_batch=128
+                    n_batch=512
                 )
 
 def _unload_llm_if_needed(model):

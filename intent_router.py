@@ -210,3 +210,4 @@ def route_command(command: str) -> dict:
         command[:50], result["intent"], result["confidence"],
     )
     return result
+

@@ -28,6 +28,11 @@ import llm_router
 import musicLibrary
 import voice_personality  # Voice 2.0 style presets
 
+# Phase 3: Tool-calling pipeline imports
+import intent_router
+import tool_registry
+from agent_executor import AgentExecutor
+
 # Emotion engine — safe import, no crash if missing
 try:
     import emotion_engine as _emotion_mod
@@ -67,14 +72,20 @@ SYSTEM = ""
 mascot_widget_ref = None
 _speak_sync_global = None
 _speak_async = None
+_agent_executor = None  # Phase 3: ReAct agent executor instance
 
 def init_voice_thread(app, system_prompt, speak_sync_fn, speak_async_fn):
     """Call once from companion.py after all modules are loaded."""
-    global flask_app, SYSTEM, _speak_sync_global, _speak_async
+    global flask_app, SYSTEM, _speak_sync_global, _speak_async, _agent_executor
     flask_app = app
     SYSTEM = system_prompt
     _speak_sync_global = speak_sync_fn
     _speak_async = speak_async_fn
+    # Phase 3: Initialize the agent executor with dashboard + speech callbacks
+    _agent_executor = AgentExecutor(
+        speak_fn=speak_async_fn,
+        flask_app=app,
+    )
 # --- BACKEND VOICE WORKER ---
 class SpeechQueueWorker(QThread):
     def __init__(self, speech_queue, audio_queue):
@@ -602,6 +613,58 @@ class VoiceAssistantThread(QThread):
         except Exception as e:
             print(f"[COMPANION PLUGINS EXEC ERROR]: {e}")
 
+        # ── Phase 3: Intelligent Intent Router ────────────────────────────────
+        # Classify the command using fast-path regex + LLM fallback.
+        # Dispatch tool_call and multi_step intents to the new pipeline.
+        # system_command, chat, music, style_change fall through to legacy handlers.
+        try:
+            _intent = intent_router.route_command(command)
+            _intent_type = _intent.get("intent", "chat")
+
+            if _intent_type == "tool_call":
+                # Single-tool execution via tool_registry
+                _tool_name = _intent["data"].get("tool")
+                if _tool_name and tool_registry.get_tool(_tool_name):
+                    self.response_generated.emit(
+                        f"Executing tool: {_tool_name}...", False
+                    )
+                    _tool_result = tool_registry.run_tool(_tool_name, _intent["data"].get("args", {}))
+                    if _tool_result["success"]:
+                        return f"{_tool_result['output']}"
+                    else:
+                        return f"Tool '{_tool_name}' failed: {_tool_result['error']}"
+                # If tool name not recognized, fall through to legacy handlers
+
+            elif _intent_type == "multi_step":
+                # Complex goal -> ReAct agent executor
+                _goal = _intent["data"].get("goal", command)
+                if _agent_executor:
+                    self.response_generated.emit(
+                        f"Starting autonomous execution: {_goal[:80]}...", False
+                    )
+                    # Run synchronously so we can return the result
+                    _agent_result = _agent_executor.run(_goal, background=False)
+                    return _agent_result or "Task completed."
+                else:
+                    # Agent executor not initialized, fall through
+                    pass
+
+            elif _intent_type == "style_change":
+                _style_data = _intent.get("data", {})
+                return _style_data.get("message", "Style updated, Boss.")
+
+            elif _intent_type == "music":
+                # Let the existing music handler below handle it
+                pass
+
+            # For 'chat' and 'system_command', fall through to legacy handlers
+        except Exception as _ir_err:
+            import logging as _log_mod
+            _log_mod.getLogger("meow.core").warning(
+                "Intent router error: %s — falling back to legacy handlers", _ir_err
+            )
+        # ── End Phase 3 Intent Router ─────────────────────────────────────────
+
         # Intercept PC control commands (Jarvis Mode)
         pc_response = pc_control.handle_pc_command(command)
         if pc_response is not None:
@@ -1072,6 +1135,8 @@ class VoiceAssistantThread(QThread):
 
         # ── Agentic task trigger ──────────────────────────────────────────────
         # "run task: <goal>" / "do task: <goal>" / "execute task <goal>"
+        # Now routes through the Phase 3 AgentExecutor (ReAct loop) instead
+        # of the legacy action_planner.
         _AGENT_TRIGGERS = [
             "run task:", "do task:", "execute task:", "run agentic task:",
             "run task ", "do task ", "agent task ", "execute autonomously ",
@@ -1081,7 +1146,17 @@ class VoiceAssistantThread(QThread):
                 _goal = command
                 for _t in _AGENT_TRIGGERS:
                     _goal = _goal.lower().replace(_t, "").strip()
-                if _goal:
+                if _goal and _agent_executor:
+                    try:
+                        self.response_generated.emit(
+                            f"Starting autonomous task: {_goal[:80]}...", False
+                        )
+                        _result = _agent_executor.run(_goal, background=False)
+                        return _result or f"Completed task: {_goal}"
+                    except Exception as _ae:
+                        return f"Couldn't start agentic task: {_ae}"
+                elif _goal:
+                    # Fallback to legacy action_planner if executor unavailable
                     try:
                         import action_planner
                         action_planner.run_agentic_task(_goal, mascot=None)

@@ -149,3 +149,4 @@ SAFE_TOOLS = {
 def is_dangerous(tool_name: str) -> bool:
     """Check if a tool requires user confirmation before execution."""
     return tool_name in DANGEROUS_TOOLS
+

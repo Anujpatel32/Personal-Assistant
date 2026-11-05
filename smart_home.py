@@ -117,3 +117,4 @@ try:
 
 except Exception as _tr_err:
     logger.warning("Could not register smart home tools: %s", _tr_err)
+

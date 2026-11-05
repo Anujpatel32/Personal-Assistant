@@ -2,16 +2,15 @@ import os
 import sys
 import winreg
 import psutil
+import logging
+
+logger = logging.getLogger("meow.core")
 
 try:
     import win32gui
     import win32process
     import win32con
     import win32com.client
-
-import logging
-logger = logging.getLogger("meow.core")
-
 except ImportError:
     win32gui = None
     win32process = None

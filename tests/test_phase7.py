@@ -34,3 +34,4 @@ def test_calendar_and_email_tools_registered():
 def test_pwa_assets_exist():
     assert os.path.exists("static/manifest.json")
     assert os.path.exists("static/sw.js")
+

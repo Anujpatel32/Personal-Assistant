@@ -26,3 +26,4 @@ def test_phase9_tools_registered():
     assert "create_voice_blend" in names
     assert "list_local_models" in names
     assert "switch_active_model" in names
+

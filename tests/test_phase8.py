@@ -26,3 +26,4 @@ def test_smart_home_tools():
     list_res = tool_registry.run_tool("list_smart_devices", {})
     assert list_res["success"] is True
     assert "Desk Lamp" in list_res["output"] or "Light" in list_res["output"]
+

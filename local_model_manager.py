@@ -108,3 +108,4 @@ try:
 
 except Exception as _tr_err:
     logger.warning("Could not register local model tools: %s", _tr_err)
+

@@ -415,7 +415,7 @@ class VoiceAssistantThread(QThread):
                     self.speech_queue.put("Dictation mode activated. I will type whatever you say in the active application, Boss.")
                     continue
 
-                if "sleep baby" in target_cmd or "you can sleep" in target_cmd or target_cmd.strip() in ["sleep", "offline"]:
+                if any(phrase in target_cmd for phrase in ["go to sleep", "sleep baby", "you can sleep", "sleep now", "take a nap", "stand down", "stop listening", "go offline"]) or target_cmd.strip() in ["sleep", "offline"]:
                     self.active_mode = False
                     flask_app.active_mode = False
                     self.is_resting = False

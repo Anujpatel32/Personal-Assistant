@@ -1060,6 +1060,22 @@ def handle_pc_command(command):
         return shutdown_pc()
     if any(phrase in cmd_clean for phrase in ["restart", "restart pc", "reboot computer", "reboot pc"]):
         return restart_pc()
+    if any(phrase in cmd_clean for phrase in ["sleep pc", "sleep computer", "put pc to sleep", "put computer to sleep", "hibernate pc"]):
+        try:
+            import os
+            os.system("rundll32.exe powrprof.dll,SetSuspendState 0,1,0")
+            return "Putting the computer to sleep now, Boss."
+        except Exception as e:
+            return f"Failed to put computer to sleep: {e}"
+
+    # Assistant Sleep / Stand Down
+    if any(phrase in cmd_clean for phrase in ["go to sleep", "sleep now", "take a nap", "stand down", "stop listening", "go offline"]) or cmd_clean in ["sleep", "offline"]:
+        try:
+            import app as flask_app
+            flask_app.active_mode = False
+        except Exception:
+            pass
+        return "Going to sleep, Boss. Say 'wake up' or click my mascot when you need me."
 
     # 12. Window Manager — switch / focus / snap / close
     switch_match = re.search(r"(?:switch to|bring up|go to|show me|take me to)\s+(.+)", cmd_clean)
@@ -1067,7 +1083,8 @@ def handle_pc_command(command):
         app_target = switch_match.group(1).strip()
         # Don't intercept generic open commands that other handlers already cover
         _skip = {"chrome", "vs code", "vscode", "dashboard", "camera", "gesture",
-                 "whatsapp", "google", "file", "folder", "tab", "window"}
+                 "whatsapp", "google", "file", "folder", "tab", "window",
+                 "sleep", "bed", "rest", "offline"}
         if not any(s == app_target or s in app_target.split() for s in _skip):
             # Always return — never let the LLM fake a window switch
             return switch_to_window(app_target)
@@ -1079,6 +1096,7 @@ def handle_pc_command(command):
         "does", "tell", "show", "help", "hey", "hello", "hi", "good", "okay",
         "thanks", "thank", "yes", "no", "stop", "pause", "play", "next", "prev",
         "volume", "brightness", "remind", "timer", "weather", "news", "time",
+        "sleep", "offline", "nap", "awake", "wake",
     }
     words = cmd_clean.split()
     if 1 <= len(words) <= 3 and not any(w in _NOT_APP_WORDS for w in words):

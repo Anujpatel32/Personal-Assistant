@@ -160,6 +160,9 @@ def call_nvidia(api_key, system_prompt, history, prompt, max_tokens=150, image_p
         role = "user" if msg["sender"] == "user" else "assistant"
         messages.append({"role": role, "content": msg["text"]})
         
+    config = memory_manager.load_config()
+    default_nvidia_model = config.get("nvidia_model") or "nvidia/llama-3.1-nemotron-70b-instruct"
+
     if image_path:
         try:
             with open(image_path, "rb") as image_file:
@@ -183,10 +186,10 @@ def call_nvidia(api_key, system_prompt, history, prompt, max_tokens=150, image_p
         except Exception as e:
             print(f"[NVIDIA VISION ERROR] Image load failed: {e}")
             messages.append({"role": "user", "content": prompt})
-            model_name = "nvidia/llama-3.1-nemotron-51b-instruct"
+            model_name = default_nvidia_model
     else:
         messages.append({"role": "user", "content": prompt})
-        model_name = "nvidia/llama-3.1-nemotron-51b-instruct"
+        model_name = default_nvidia_model
         
     payload = {
         "model": model_name,
@@ -451,6 +454,9 @@ def call_nvidia_stream(api_key, system_prompt, history, prompt, max_tokens=150, 
         role = "user" if msg["sender"] == "user" else "assistant"
         messages.append({"role": role, "content": msg["text"]})
         
+    config = memory_manager.load_config()
+    default_nvidia_model = config.get("nvidia_model") or "nvidia/llama-3.1-nemotron-70b-instruct"
+
     if image_path:
         try:
             with open(image_path, "rb") as image_file:
@@ -466,10 +472,10 @@ def call_nvidia_stream(api_key, system_prompt, history, prompt, max_tokens=150, 
         except Exception as e:
             print(f"[NVIDIA VISION ERROR] Image load failed: {e}")
             messages.append({"role": "user", "content": prompt})
-            model_name = "nvidia/llama-3.1-nemotron-51b-instruct"
+            model_name = default_nvidia_model
     else:
         messages.append({"role": "user", "content": prompt})
-        model_name = "nvidia/llama-3.1-nemotron-51b-instruct"
+        model_name = default_nvidia_model
         
     payload = {
         "model": model_name,
@@ -641,6 +647,55 @@ def _unload_llm_if_needed(model):
                 import gc
                 gc.collect()
 
+def _local_llama_stream(system_prompt, history, prompt, max_tokens=150):
+    """Streams responses using the local TinyLlama model."""
+    _ensure_llm_loaded()
+    history_prompt = ""
+    for msg in history:
+        if msg["sender"] == "user":
+            history_prompt += f"<|user|>\n{msg['text']}</s>\n"
+        elif msg["sender"] == "assistant":
+            history_prompt += f"<|assistant|>\n{msg['text']}</s>\n"
+            
+    full_prompt = f"<|system|>\n{system_prompt}</s>\n{history_prompt}<|user|>\n{prompt}</s>\n<|assistant|>\n"
+    
+    with llm_lock:
+        stream = llm(
+            full_prompt,
+            max_tokens=max_tokens,
+            temperature=0.7,
+            top_p=0.9,
+            repeat_penalty=1.1,
+            stop=["</s>", "<|user|>", "<|system|>"],
+            stream=True
+        )
+        for chunk in stream:
+            text = chunk["choices"][0]["text"]
+            yield text
+
+def _local_llama_query(system_prompt, history, prompt, max_tokens=150):
+    """Executes a single completion using the local TinyLlama model."""
+    _ensure_llm_loaded()
+    history_prompt = ""
+    for msg in history:
+        if msg["sender"] == "user":
+            history_prompt += f"<|user|>\n{msg['text']}</s>\n"
+        elif msg["sender"] == "assistant":
+            history_prompt += f"<|assistant|>\n{msg['text']}</s>\n"
+            
+    full_prompt = f"<|system|>\n{system_prompt}</s>\n{history_prompt}<|user|>\n{prompt}</s>\n<|assistant|>\n"
+    
+    with llm_lock:
+        output = llm(
+            full_prompt,
+            max_tokens=max_tokens,
+            temperature=0.7,
+            top_p=0.9,
+            repeat_penalty=1.1,
+            stop=["</s>", "<|user|>", "<|system|>"]
+        )
+    return output["choices"][0]["text"].strip()
+
 def query_llm_stream(prompt, system_prompt, history=[], max_tokens=150, image_path=None):
     global llm
     # Prepend Meow's current mood modifier to the system prompt
@@ -653,50 +708,64 @@ def query_llm_stream(prompt, system_prompt, history=[], max_tokens=150, image_pa
     model = config.get("selected_model", "llama")
     _unload_llm_if_needed(model)
 
+    def _execute_stream_with_fallback(cloud_stream_fn):
+        had_tokens = False
+        try:
+            for chunk in cloud_stream_fn():
+                c_low = chunk.lower()
+                if not had_tokens and any(err in c_low for err in [
+                    "model not found", "deprecated", "api key is invalid",
+                    "quota exceeded", "rate limit exceeded", "encountered an error communicating",
+                    "error (http", "unauthorized", "timed out"
+                ]):
+                    print(f"[LLM ROUTER] Cloud stream returned error: {chunk.strip()}. Falling back to local LLaMA...", flush=True)
+                    yield from _local_llama_stream(system_prompt, history, prompt, max_tokens)
+                    return
+                had_tokens = True
+                yield chunk
+        except Exception as e:
+            print(f"[LLM ROUTER] Cloud stream failed with exception: {e}. Falling back to local LLaMA...", flush=True)
+            if not had_tokens:
+                yield from _local_llama_stream(system_prompt, history, prompt, max_tokens)
+
     if model == "gemini":
         api_key = config.get("gemini_api_key", "")
         if api_key:
-            yield from call_gemini_stream(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
+            yield from _execute_stream_with_fallback(
+                lambda: call_gemini_stream(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
+            )
+        else:
+            yield from _local_llama_stream(system_prompt, history, prompt, max_tokens)
             
     elif model == "groq":
         api_key = config.get("groq_api_key", "")
         if api_key:
-            yield from call_groq_stream(api_key, system_prompt, history, prompt, max_tokens)
+            yield from _execute_stream_with_fallback(
+                lambda: call_groq_stream(api_key, system_prompt, history, prompt, max_tokens)
+            )
+        else:
+            yield from _local_llama_stream(system_prompt, history, prompt, max_tokens)
             
     elif model == "nvidia":
         api_key = config.get("nvidia_api_key", "")
         if api_key:
-            yield from call_nvidia_stream(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
+            yield from _execute_stream_with_fallback(
+                lambda: call_nvidia_stream(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
+            )
+        else:
+            yield from _local_llama_stream(system_prompt, history, prompt, max_tokens)
             
     elif model == "openrouter":
         api_key = config.get("openrouter_api_key", "")
         if api_key:
-            yield from call_openrouter_stream(api_key, system_prompt, history, prompt, max_tokens)
+            yield from _execute_stream_with_fallback(
+                lambda: call_openrouter_stream(api_key, system_prompt, history, prompt, max_tokens)
+            )
+        else:
+            yield from _local_llama_stream(system_prompt, history, prompt, max_tokens)
             
     else: # local llama
-        _ensure_llm_loaded()
-        history_prompt = ""
-        for msg in history:
-            if msg["sender"] == "user":
-                history_prompt += f"<|user|>\n{msg['text']}</s>\n"
-            elif msg["sender"] == "assistant":
-                history_prompt += f"<|assistant|>\n{msg['text']}</s>\n"
-                
-        full_prompt = f"<|system|>\n{system_prompt}</s>\n{history_prompt}<|user|>\n{prompt}</s>\n<|assistant|>\n"
-        
-        with llm_lock:
-            stream = llm(
-                full_prompt,
-                max_tokens=max_tokens,
-                temperature=0.7,
-                top_p=0.9,
-                repeat_penalty=1.1,
-                stop=["</s>", "<|user|>", "<|system|>"],
-                stream=True
-            )
-            for chunk in stream:
-                text = chunk["choices"][0]["text"]
-                yield text
+        yield from _local_llama_stream(system_prompt, history, prompt, max_tokens)
 
 def query_llm(prompt, system_prompt, history=[], max_tokens=150, image_path=None):
     global llm
@@ -710,50 +779,28 @@ def query_llm(prompt, system_prompt, history=[], max_tokens=150, image_path=None
     model = config.get("selected_model", "llama")
     _unload_llm_if_needed(model)
 
+    resp = None
     if model == "gemini":
         api_key = config.get("gemini_api_key", "")
-        if not api_key:
-            return "Gemini API key is not configured. Please set it in Settings."
-        return call_gemini(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
-        
+        if api_key:
+            resp = call_gemini(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
     elif model == "groq":
         api_key = config.get("groq_api_key", "")
-        if not api_key:
-            return "Groq API key is not configured. Please set it in Settings."
-        return call_groq(api_key, system_prompt, history, prompt, max_tokens)
-        
+        if api_key:
+            resp = call_groq(api_key, system_prompt, history, prompt, max_tokens)
     elif model == "nvidia":
         api_key = config.get("nvidia_api_key", "")
-        if not api_key:
-            return "Nvidia API key is not configured. Please set it in Settings."
-        return call_nvidia(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
-        
+        if api_key:
+            resp = call_nvidia(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
     elif model == "openrouter":
         api_key = config.get("openrouter_api_key", "")
-        if not api_key:
-            return "OpenRouter API key is not configured. Please set it in Settings."
-        return call_openrouter(api_key, system_prompt, history, prompt, max_tokens)
-        
+        if api_key:
+            resp = call_openrouter(api_key, system_prompt, history, prompt, max_tokens)
 
-    else: # local llama
-        _ensure_llm_loaded()
-        # Format history for TinyLlama
-        history_prompt = ""
-        for msg in history:
-            if msg["sender"] == "user":
-                history_prompt += f"<|user|>\n{msg['text']}</s>\n"
-            elif msg["sender"] == "assistant":
-                history_prompt += f"<|assistant|>\n{msg['text']}</s>\n"
-                
-        full_prompt = f"<|system|>\n{system_prompt}</s>\n{history_prompt}<|user|>\n{prompt}</s>\n<|assistant|>\n"
-        
-        with llm_lock:
-            output = llm(
-                full_prompt,
-                max_tokens=max_tokens,
-                temperature=0.7,
-                top_p=0.9,
-                repeat_penalty=1.1,
-                stop=["</s>", "<|user|>", "<|system|>"]
-            )
-        return output["choices"][0]["text"].strip()
+    if resp:
+        resp_low = resp.lower()
+        if not any(err in resp_low for err in ["error", "not found", "deprecated", "invalid", "quota exceeded", "rate limit"]):
+            return resp
+        print(f"[LLM ROUTER] Cloud call returned error: '{resp}'. Falling back to local LLaMA...", flush=True)
+
+    return _local_llama_query(system_prompt, history, prompt, max_tokens)

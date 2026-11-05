@@ -711,7 +711,7 @@ class VoiceAssistantThread(QThread):
 
         # Intercept Vision commands (Phase 4)
         config = memory_manager.load_config()
-        active_model = config.get("selected_model", "llama")
+        active_model = config.get("selected_model", "gemini")
         if active_model in ["nvidia", "gemini"]:
             import vision_control
             vision_response = vision_control.handle_vision_command(
@@ -793,7 +793,7 @@ class VoiceAssistantThread(QThread):
             target = command.lower()
             new_model = None
             if "llama" in target or "local" in target or "offline" in target:
-                new_model = "llama"
+                return "Local AI has been removed from MEOW. Please choose Gemini, Groq, Nvidia, or OpenRouter."
             elif "gemini" in target:
                 new_model = "gemini"
             elif "groq" in target:
@@ -819,7 +819,7 @@ class VoiceAssistantThread(QThread):
                         pass
                 return f"Model configured to {new_model}, Boss."
             else:
-                return "Which model would you like to switch to? You can say local LLaMA, Gemini, Groq, Nvidia, or OpenRouter."
+                return "Which cloud model would you like? You can say Gemini, Groq, Nvidia, or OpenRouter."
 
         if "open google" in command or "search" in command:
             query = command.replace("search", "").replace("open google", "").strip()

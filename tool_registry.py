@@ -403,7 +403,7 @@ def _tool_get_weather(city: str = "Pune"):
 
 
 # -- Auto-load extension modules ---------------------------------------------
-for _mod_name in ["calendar_manager", "email_manager", "smart_home", "multimodal_agent"]:
+for _mod_name in ["calendar_manager", "email_manager", "smart_home", "multimodal_agent", "voice_clone", "local_model_manager"]:
     try:
         __import__(_mod_name)
     except Exception as _e:

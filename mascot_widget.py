@@ -321,7 +321,7 @@ class MascotWidget(QWidget):
     @Slot()
     def on_sync_menu(self):
         config = memory_manager.load_config()
-        model_name = config.get("selected_model", "llama")
+        model_name = config.get("selected_model", "gemini")
         speak_async(f"Model configured to {model_name}, Boss.")
 
     @Slot(str)
@@ -1266,12 +1266,7 @@ class MascotWidget(QWidget):
         # Add Active Model Select options directly in context menu
         model_menu = menu.addMenu("Active Model")
         config = memory_manager.load_config()
-        active_model = config.get("selected_model", "llama")
-
-        llama_action = QAction("Local LLaMA (Offline)", self)
-        llama_action.setCheckable(True)
-        llama_action.setChecked(active_model == "llama")
-        llama_action.triggered.connect(lambda: self.switch_model_to("llama"))
+        active_model = config.get("selected_model", "gemini")
 
         gemini_action = QAction("Gemini 2.0 Flash", self)
         gemini_action.setCheckable(True)
@@ -1293,7 +1288,6 @@ class MascotWidget(QWidget):
         openrouter_action.setChecked(active_model == "openrouter")
         openrouter_action.triggered.connect(lambda: self.switch_model_to("openrouter"))
 
-        model_menu.addAction(llama_action)
         model_menu.addAction(gemini_action)
         model_menu.addAction(groq_action)
         model_menu.addAction(nvidia_action)

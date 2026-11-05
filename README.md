@@ -31,6 +31,23 @@
 
 ---
 
+## ☁️ Cloud-only AI
+
+MEOW's chat and reasoning engine uses configured cloud providers only:
+- Google Gemini
+- Groq
+- NVIDIA NIM
+- OpenRouter
+
+Local LLM inference (TinyLlama / GGUF via llama.cpp) is not supported. If a selected
+provider is unavailable, MEOW tries other providers for which an API key is configured.
+If no provider is configured or all configured providers fail, MEOW reports that state
+instead of loading a local model.
+
+This change does not remove local speech/audio components, optional Kokoro TTS,
+document storage, or the ChromaDB vector store used by the knowledge-base feature.
+Those components are separate from local generative chat inference.
+
 ## 🚀 Quick Start
 
 ### Prerequisites

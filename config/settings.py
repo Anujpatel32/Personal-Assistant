@@ -140,6 +140,9 @@ class Settings:
         self._selected_model: str = self._resolve(
             "SELECTED_MODEL", "selected_model", DEFAULT_SELECTED_MODEL, mem
         )
+        # Migrate legacy local/unknown model selections to the cloud default.
+        if self._selected_model not in {"gemini", "groq", "nvidia", "openrouter"}:
+            self._selected_model = DEFAULT_SELECTED_MODEL
         self._selected_tts: str = self._resolve(
             "SELECTED_TTS", "selected_tts", DEFAULT_SELECTED_TTS, mem
         )

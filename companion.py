@@ -71,7 +71,7 @@ SYSTEM = (
     "8. CONCISE: Keep responses short and to the point unless the user asks for detail. A few sentences is ideal for casual chat."
 )
 
-# llm and llm_lock are owned by llm_router.py — reference via llm_router.llm / llm_router.llm_lock
+# LLM requests are routed exclusively to configured cloud providers by llm_router.py.
 
 # --- WEATHER BG CACHING ---
 cached_weather = "Loading weather..."
@@ -174,7 +174,7 @@ if __name__ == "__main__":
         # Initialize PySide Application
         qapp = QApplication(sys.argv)
 
-        # Create mascot desktop companion (queries LLaMA lazily if needed)
+        # Create the MEOW desktop companion (cloud-only AI; no local LLM is loaded)
         mascot = MascotWidget(None)
         flask_app.mascot_widget_ref = mascot
         mascot.show()

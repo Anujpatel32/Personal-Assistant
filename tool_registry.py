@@ -402,4 +402,11 @@ def _tool_get_weather(city: str = "Pune"):
         return f"Weather error: {e}"
 
 
+# -- Auto-load extension modules ---------------------------------------------
+for _mod_name in ["calendar_manager", "email_manager", "smart_home", "multimodal_agent"]:
+    try:
+        __import__(_mod_name)
+    except Exception as _e:
+        logger.debug("Optional tool module %s not loaded: %s", _mod_name, _e)
+
 logger.info("Loaded %d tools: %s", len(_REGISTRY), ', '.join(_REGISTRY.keys()))

@@ -238,8 +238,11 @@ def load_config():
         if _config_cache is not None and (time.time() - _config_cache_ts) < _CONFIG_TTL:
             return _config_cache
         data = load_memory()
+        selected_model = str(data.get("selected_model") or "gemini").strip().lower()
+        if selected_model not in {"gemini", "groq", "nvidia", "openrouter"}:
+            selected_model = "gemini"
         _config_cache = {
-            "selected_model": data.get("selected_model", "llama"),
+            "selected_model": selected_model,
             "gemini_api_key": data.get("gemini_api_key", ""),
             "groq_api_key": data.get("groq_api_key", ""),
             "nvidia_api_key": data.get("nvidia_api_key", ""),
@@ -257,6 +260,9 @@ def load_config():
 def save_config(selected_model, gemini_api_key, groq_api_key, nvidia_api_key=None, openrouter_api_key=None, selected_tts=None, elevenlabs_api_key=None, elevenlabs_voice_id=None, kokoro_voice=None, kokoro_voice_mix=None, avatar_type=None):
     global _config_cache, _config_cache_ts
     data = load_memory()
+    selected_model = str(selected_model or "gemini").strip().lower()
+    if selected_model not in {"gemini", "groq", "nvidia", "openrouter"}:
+        selected_model = "gemini"
     data["selected_model"] = selected_model
     data["gemini_api_key"] = gemini_api_key
     data["groq_api_key"] = groq_api_key

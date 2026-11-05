@@ -24,9 +24,6 @@ try:
 except Exception:
     emotion_engine = None
 
-# The global LLaMA model instance and its lock — shared with companion.py
-llm = None
-llm_lock = threading.Lock()
 # --- CLOUD LLM API INTEGRATIONS ---
 def call_gemini(api_key, system_prompt, history, prompt, max_tokens=150, image_path=None):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
@@ -614,193 +611,134 @@ def call_openrouter_stream(api_key, system_prompt, history, prompt, max_tokens=1
         print(f"[OPENROUTER STREAM ERROR]: {e}")
         yield f"OpenRouter error: {e}"
 
-def _ensure_llm_loaded():
-    """Lazy-loads the local TinyLlama model thread-safely. Called by both query_llm and query_llm_stream."""
-    global llm
-    if llm is None:
-        with llm_lock:
-            if llm is None:
-                print("[COMPANION] Lazy loading local LLaMA brain...", flush=True)
-                exe_dir = os.path.dirname(sys.argv[0])
-                model_path = os.path.join(exe_dir, "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf")
-                if not os.path.exists(model_path):
-                    model_path = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
-                from llama_cpp import Llama
-                cpu_count = os.cpu_count() or 4
-                optimal_threads = max(2, min(8, cpu_count - 1 if cpu_count > 2 else cpu_count))
-                llm = Llama(
-                    model_path=model_path,
-                    n_ctx=1024,
-                    n_threads=optimal_threads,
-                    n_batch=512
-                )
 
-def _unload_llm_if_needed(model):
-    """Unloads the local LLaMA model from memory if a cloud model is now active."""
-    global llm
-    if model != "llama" and llm is not None:
-        with llm_lock:
-            if llm is not None:
-                print("[COMPANION] Unloading local LLaMA to free memory...", flush=True)
-                del llm
-                llm = None
-                import gc
-                gc.collect()
+# ---------------------------------------------------------------------------
+# CLOUD-ONLY ROUTING
+# ---------------------------------------------------------------------------
+_last_reasoning_details = None
 
-def _local_llama_stream(system_prompt, history, prompt, max_tokens=150):
-    """Streams responses using the local TinyLlama model."""
-    _ensure_llm_loaded()
-    history_prompt = ""
-    for msg in history:
-        if msg["sender"] == "user":
-            history_prompt += f"<|user|>\n{msg['text']}</s>\n"
-        elif msg["sender"] == "assistant":
-            history_prompt += f"<|assistant|>\n{msg['text']}</s>\n"
-            
-    full_prompt = f"<|system|>\n{system_prompt}</s>\n{history_prompt}<|user|>\n{prompt}</s>\n<|assistant|>\n"
-    
-    with llm_lock:
-        stream = llm(
-            full_prompt,
-            max_tokens=max_tokens,
-            temperature=0.7,
-            top_p=0.9,
-            repeat_penalty=1.1,
-            stop=["</s>", "<|user|>", "<|system|>"],
-            stream=True
-        )
-        for chunk in stream:
-            text = chunk["choices"][0]["text"]
-            yield text
+_SUPPORTED_PROVIDERS = ("gemini", "groq", "nvidia", "openrouter")
+_ERROR_MARKERS = (
+    "api error:", "api key is invalid", "api key is missing",
+    "quota exceeded", "rate limit exceeded", "rate limit",
+    "model not found", "deprecated", "unauthorized",
+    "timed out", "error communicating", "request failed",
+)
 
-def _local_llama_query(system_prompt, history, prompt, max_tokens=150):
-    """Executes a single completion using the local TinyLlama model."""
-    _ensure_llm_loaded()
-    history_prompt = ""
-    for msg in history:
-        if msg["sender"] == "user":
-            history_prompt += f"<|user|>\n{msg['text']}</s>\n"
-        elif msg["sender"] == "assistant":
-            history_prompt += f"<|assistant|>\n{msg['text']}</s>\n"
-            
-    full_prompt = f"<|system|>\n{system_prompt}</s>\n{history_prompt}<|user|>\n{prompt}</s>\n<|assistant|>\n"
-    
-    with llm_lock:
-        output = llm(
-            full_prompt,
-            max_tokens=max_tokens,
-            temperature=0.7,
-            top_p=0.9,
-            repeat_penalty=1.1,
-            stop=["</s>", "<|user|>", "<|system|>"]
-        )
-    return output["choices"][0]["text"].strip()
+def _provider_order(config):
+    """Return configured cloud providers, preferring the user's selection."""
+    selected = str(config.get("selected_model") or "gemini").strip().lower()
+    if selected not in _SUPPORTED_PROVIDERS:
+        selected = "gemini"
+    key_names = {
+        "gemini": "gemini_api_key",
+        "groq": "groq_api_key",
+        "nvidia": "nvidia_api_key",
+        "openrouter": "openrouter_api_key",
+    }
+    order = [selected] + [name for name in _SUPPORTED_PROVIDERS if name != selected]
+    return [name for name in order if str(config.get(key_names[name]) or "").strip()]
 
-def query_llm_stream(prompt, system_prompt, history=[], max_tokens=150, image_path=None):
-    global llm
-    # Prepend Meow's current mood modifier to the system prompt
+def _is_provider_error(value):
+    text = str(value or "").strip().lower()
+    return not text or any(marker in text for marker in _ERROR_MARKERS)
+
+def _with_mood(system_prompt):
     if emotion_engine:
-        mood_mod = emotion_engine.get_mood_modifier()
-        if mood_mod:
-            system_prompt = f"{system_prompt}\n\n{mood_mod}"
-
-    config = memory_manager.load_config()
-    model = config.get("selected_model", "llama")
-    _unload_llm_if_needed(model)
-
-    def _execute_stream_with_fallback(cloud_stream_fn):
-        had_tokens = False
         try:
-            for chunk in cloud_stream_fn():
-                c_low = chunk.lower()
-                if not had_tokens and any(err in c_low for err in [
-                    "model not found", "deprecated", "api key is invalid",
-                    "quota exceeded", "rate limit exceeded", "encountered an error communicating",
-                    "error (http", "unauthorized", "timed out"
-                ]):
-                    print(f"[LLM ROUTER] Cloud stream returned error: {chunk.strip()}. Falling back to local LLaMA...", flush=True)
-                    yield from _local_llama_stream(system_prompt, history, prompt, max_tokens)
-                    return
-                had_tokens = True
-                yield chunk
-        except Exception as e:
-            print(f"[LLM ROUTER] Cloud stream failed with exception: {e}. Falling back to local LLaMA...", flush=True)
-            if not had_tokens:
-                yield from _local_llama_stream(system_prompt, history, prompt, max_tokens)
+            mood_mod = emotion_engine.get_mood_modifier()
+            if mood_mod:
+                return f"{system_prompt}\n\n{mood_mod}"
+        except Exception as exc:
+            print(f"[LLM ROUTER] Could not read mood modifier: {exc}", flush=True)
+    return system_prompt
 
-    if model == "gemini":
-        api_key = config.get("gemini_api_key", "")
-        if api_key:
-            yield from _execute_stream_with_fallback(
-                lambda: call_gemini_stream(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
-            )
-        else:
-            yield from _local_llama_stream(system_prompt, history, prompt, max_tokens)
-            
-    elif model == "groq":
-        api_key = config.get("groq_api_key", "")
-        if api_key:
-            yield from _execute_stream_with_fallback(
-                lambda: call_groq_stream(api_key, system_prompt, history, prompt, max_tokens)
-            )
-        else:
-            yield from _local_llama_stream(system_prompt, history, prompt, max_tokens)
-            
-    elif model == "nvidia":
-        api_key = config.get("nvidia_api_key", "")
-        if api_key:
-            yield from _execute_stream_with_fallback(
-                lambda: call_nvidia_stream(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
-            )
-        else:
-            yield from _local_llama_stream(system_prompt, history, prompt, max_tokens)
-            
-    elif model == "openrouter":
-        api_key = config.get("openrouter_api_key", "")
-        if api_key:
-            yield from _execute_stream_with_fallback(
-                lambda: call_openrouter_stream(api_key, system_prompt, history, prompt, max_tokens)
-            )
-        else:
-            yield from _local_llama_stream(system_prompt, history, prompt, max_tokens)
-            
-    else: # local llama
-        yield from _local_llama_stream(system_prompt, history, prompt, max_tokens)
+def _call_provider(provider, config, system_prompt, history, prompt, max_tokens, image_path=None):
+    api_key = config.get(f"{provider}_api_key", "")
+    if provider == "gemini":
+        return call_gemini(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
+    if provider == "groq":
+        return call_groq(api_key, system_prompt, history, prompt, max_tokens)
+    if provider == "nvidia":
+        return call_nvidia(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
+    if provider == "openrouter":
+        return call_openrouter(api_key, system_prompt, history, prompt, max_tokens)
+    raise ValueError(f"Unsupported cloud provider: {provider}")
 
-def query_llm(prompt, system_prompt, history=[], max_tokens=150, image_path=None):
-    global llm
-    # Prepend Meow's current mood modifier to the system prompt
-    if emotion_engine:
-        mood_mod = emotion_engine.get_mood_modifier()
-        if mood_mod:
-            system_prompt = f"{system_prompt}\n\n{mood_mod}"
+def _stream_provider(provider, config, system_prompt, history, prompt, max_tokens, image_path=None):
+    api_key = config.get(f"{provider}_api_key", "")
+    if provider == "gemini":
+        yield from call_gemini_stream(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
+    elif provider == "groq":
+        yield from call_groq_stream(api_key, system_prompt, history, prompt, max_tokens)
+    elif provider == "nvidia":
+        yield from call_nvidia_stream(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
+    elif provider == "openrouter":
+        yield from call_openrouter_stream(api_key, system_prompt, history, prompt, max_tokens)
+    else:
+        raise ValueError(f"Unsupported cloud provider: {provider}")
 
+def _no_provider_message():
+    return (
+        "MEOW is running in cloud-only mode, but no cloud AI provider is configured. "
+        "Add an API key for Gemini, Groq, NVIDIA, or OpenRouter in Settings."
+    )
+
+def query_llm_stream(prompt, system_prompt, history=None, max_tokens=150, image_path=None):
+    """Stream from configured cloud providers; never load or fall back to a local model."""
+    global _last_reasoning_details
+    _last_reasoning_details = None
+    history = history or []
     config = memory_manager.load_config()
-    model = config.get("selected_model", "llama")
-    _unload_llm_if_needed(model)
+    system_prompt = _with_mood(system_prompt)
+    providers = _provider_order(config)
+    if not providers:
+        yield _no_provider_message()
+        return
 
-    resp = None
-    if model == "gemini":
-        api_key = config.get("gemini_api_key", "")
-        if api_key:
-            resp = call_gemini(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
-    elif model == "groq":
-        api_key = config.get("groq_api_key", "")
-        if api_key:
-            resp = call_groq(api_key, system_prompt, history, prompt, max_tokens)
-    elif model == "nvidia":
-        api_key = config.get("nvidia_api_key", "")
-        if api_key:
-            resp = call_nvidia(api_key, system_prompt, history, prompt, max_tokens, image_path=image_path)
-    elif model == "openrouter":
-        api_key = config.get("openrouter_api_key", "")
-        if api_key:
-            resp = call_openrouter(api_key, system_prompt, history, prompt, max_tokens)
+    for provider in providers:
+        emitted = False
+        buffered_error = None
+        try:
+            for chunk in _stream_provider(
+                provider, config, system_prompt, history, prompt, max_tokens, image_path
+            ):
+                if not emitted and _is_provider_error(chunk):
+                    buffered_error = str(chunk)
+                    break
+                emitted = True
+                yield chunk
+            if emitted:
+                return
+            if buffered_error:
+                print(f"[LLM ROUTER] {provider} unavailable: {buffered_error}", flush=True)
+        except Exception as exc:
+            print(f"[LLM ROUTER] {provider} stream failed: {exc}", flush=True)
+            if emitted:
+                return
 
-    if resp:
-        resp_low = resp.lower()
-        if not any(err in resp_low for err in ["error", "not found", "deprecated", "invalid", "quota exceeded", "rate limit"]):
-            return resp
-        print(f"[LLM ROUTER] Cloud call returned error: '{resp}'. Falling back to local LLaMA...", flush=True)
+    yield "All configured cloud AI providers are currently unavailable. Check your internet connection, API keys, quotas, and provider status."
 
-    return _local_llama_query(system_prompt, history, prompt, max_tokens)
+def query_llm(prompt, system_prompt, history=None, max_tokens=150, image_path=None):
+    """Generate a response using configured cloud providers only."""
+    global _last_reasoning_details
+    _last_reasoning_details = None
+    history = history or []
+    config = memory_manager.load_config()
+    system_prompt = _with_mood(system_prompt)
+    providers = _provider_order(config)
+    if not providers:
+        return _no_provider_message()
+
+    for provider in providers:
+        try:
+            response = _call_provider(
+                provider, config, system_prompt, history, prompt, max_tokens, image_path
+            )
+            if not _is_provider_error(response):
+                return response
+            print(f"[LLM ROUTER] {provider} unavailable: {response}", flush=True)
+        except Exception as exc:
+            print(f"[LLM ROUTER] {provider} request failed: {exc}", flush=True)
+
+    return "All configured cloud AI providers are currently unavailable. Check your internet connection, API keys, quotas, and provider status."

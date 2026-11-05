@@ -622,7 +622,8 @@ _ERROR_MARKERS = (
     "api error:", "api key is invalid", "api key is missing",
     "quota exceeded", "rate limit exceeded", "rate limit",
     "model not found", "deprecated", "unauthorized",
-    "timed out", "error communicating", "request failed",
+    "timed out", "error communicating", "encountered an error",
+    "request failed", "returned an empty", "please try again", "sorry,",
 )
 
 def _provider_order(config):

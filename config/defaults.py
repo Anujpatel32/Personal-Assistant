@@ -27,7 +27,7 @@ DEFAULT_KOKORO_VOICE_MIX = {
 }
 
 # ── Model / TTS Selection ──────────────────────────────────────────
-DEFAULT_SELECTED_MODEL = "gemini"
+DEFAULT_SELECTED_MODEL = "groq"
 DEFAULT_SELECTED_TTS = "sapi"
 
 # ── Assistant Behaviour ─────────────────────────────────────────────

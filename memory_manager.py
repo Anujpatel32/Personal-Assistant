@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import re
 import threading
@@ -239,7 +239,7 @@ def load_config():
             return _config_cache
         data = load_memory()
         _config_cache = {
-            "selected_model": data.get("selected_model", "llama"),
+            "selected_model": data.get("selected_model", "groq"),
             "gemini_api_key": data.get("gemini_api_key", ""),
             "groq_api_key": data.get("groq_api_key", ""),
             "nvidia_api_key": data.get("nvidia_api_key", ""),

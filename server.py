@@ -112,7 +112,7 @@ class AgentRunResponse(BaseModel):
 
 class ConfigUpdateRequest(BaseModel):
     """Update model and TTS configuration."""
-    selected_model: str = "llama"
+    selected_model: str = "groq"
     gemini_api_key: str = ""
     groq_api_key: str = ""
     nvidia_api_key: str = ""

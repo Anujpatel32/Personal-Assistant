@@ -321,7 +321,7 @@ class MascotWidget(QWidget):
     @Slot()
     def on_sync_menu(self):
         config = memory_manager.load_config()
-        model_name = config.get("selected_model", "llama")
+        model_name = config.get("selected_model", "groq")
         speak_async(f"Model configured to {model_name}, Boss.")
 
     @Slot(str)
@@ -1266,36 +1266,30 @@ class MascotWidget(QWidget):
         # Add Active Model Select options directly in context menu
         model_menu = menu.addMenu("Active Model")
         config = memory_manager.load_config()
-        active_model = config.get("selected_model", "llama")
+        active_model = config.get("selected_model", "groq")
 
-        llama_action = QAction("Local LLaMA (Offline)", self)
-        llama_action.setCheckable(True)
-        llama_action.setChecked(active_model == "llama")
-        llama_action.triggered.connect(lambda: self.switch_model_to("llama"))
-
-        gemini_action = QAction("Gemini 2.0 Flash", self)
-        gemini_action.setCheckable(True)
-        gemini_action.setChecked(active_model == "gemini")
-        gemini_action.triggered.connect(lambda: self.switch_model_to("gemini"))
-
-        groq_action = QAction("Groq LLaMA-3", self)
+        groq_action = QAction("Groq (Ultra-Fast Cloud)", self)
         groq_action.setCheckable(True)
         groq_action.setChecked(active_model == "groq")
         groq_action.triggered.connect(lambda: self.switch_model_to("groq"))
 
-        nvidia_action = QAction("Nvidia LLaMA-3.1", self)
+        gemini_action = QAction("Gemini 2.0 Flash (Cloud)", self)
+        gemini_action.setCheckable(True)
+        gemini_action.setChecked(active_model == "gemini")
+        gemini_action.triggered.connect(lambda: self.switch_model_to("gemini"))
+
+        nvidia_action = QAction("Nvidia NIM (Cloud)", self)
         nvidia_action.setCheckable(True)
         nvidia_action.setChecked(active_model == "nvidia")
         nvidia_action.triggered.connect(lambda: self.switch_model_to("nvidia"))
 
-        openrouter_action = QAction("OpenRouter Free", self)
+        openrouter_action = QAction("OpenRouter (Cloud)", self)
         openrouter_action.setCheckable(True)
         openrouter_action.setChecked(active_model == "openrouter")
         openrouter_action.triggered.connect(lambda: self.switch_model_to("openrouter"))
 
-        model_menu.addAction(llama_action)
-        model_menu.addAction(gemini_action)
         model_menu.addAction(groq_action)
+        model_menu.addAction(gemini_action)
         model_menu.addAction(nvidia_action)
         model_menu.addAction(openrouter_action)
 

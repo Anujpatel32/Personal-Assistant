@@ -118,7 +118,7 @@ def run_tests():
     # ---- 5. Config API ----
     print("\n--- 5. CONFIG API ---")
     test("POST /api/config (save config)", "POST", "/api/config", 200,
-         json_data={"selected_model": "llama", "selected_tts": "sapi"},
+         json_data={"selected_model": "groq", "selected_tts": "sapi"},
          check_keys=["success"])
 
     # ---- 6. Gesture Control API ----

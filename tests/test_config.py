@@ -10,7 +10,7 @@ def test_settings_singleton():
 
 def test_defaults_loaded():
     assert settings.wake_word == DEFAULT_WAKE_WORD
-    assert settings.selected_model in ["gemini", "llama", "groq", "nvidia", "openrouter"]
+    assert settings.selected_model in ["gemini", "groq", "nvidia", "openrouter"]
 
 def test_to_dict_keys():
     data = settings.to_dict()

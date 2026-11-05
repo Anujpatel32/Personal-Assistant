@@ -53,12 +53,12 @@ def list_local_models() -> Dict[str, Any]:
 
 
 def switch_model(model_name: str) -> Dict[str, Any]:
-    """Switch active LLM model to local or cloud provider."""
+    """Switch active LLM model to a cloud AI provider."""
     import memory_manager
     config = memory_manager.load_config()
     target = model_name.lower().strip()
 
-    valid_models = ["gemini", "groq", "nvidia", "llama", "openrouter"]
+    valid_models = ["groq", "gemini", "nvidia", "openrouter"]
     selected = None
     for v in valid_models:
         if v in target:
@@ -66,7 +66,7 @@ def switch_model(model_name: str) -> Dict[str, Any]:
             break
 
     if not selected:
-        selected = "llama" if "local" in target or "gguf" in target else target
+        selected = "groq"
 
     memory_manager.save_config(
         selected,
@@ -99,7 +99,7 @@ try:
 
     @tool_registry.register_tool(
         "switch_active_model",
-        "Switch the active AI brain between gemini, groq, nvidia, llama (local), or openrouter",
+        "Switch the active AI brain between groq, gemini, nvidia, or openrouter",
         ["model_name"]
     )
     def _tool_switch_model(model_name: str):

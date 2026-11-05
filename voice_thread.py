@@ -711,7 +711,7 @@ class VoiceAssistantThread(QThread):
 
         # Intercept Vision commands (Phase 4)
         config = memory_manager.load_config()
-        active_model = config.get("selected_model", "llama")
+        active_model = config.get("selected_model", "groq")
         if active_model in ["nvidia", "gemini"]:
             import vision_control
             vision_response = vision_control.handle_vision_command(
@@ -792,9 +792,7 @@ class VoiceAssistantThread(QThread):
         if any(phrase in command.lower() for phrase in ["switch model to", "change model to", "use model", "switch to model", "change to model"]):
             target = command.lower()
             new_model = None
-            if "llama" in target or "local" in target or "offline" in target:
-                new_model = "llama"
-            elif "gemini" in target:
+            if "gemini" in target:
                 new_model = "gemini"
             elif "groq" in target:
                 new_model = "groq"
@@ -802,6 +800,8 @@ class VoiceAssistantThread(QThread):
                 new_model = "nvidia"
             elif "open router" in target or "openrouter" in target:
                 new_model = "openrouter"
+            elif "llama" in target or "local" in target or "offline" in target:
+                return "Local offline LLaMA has been retired, Boss. We now use ultra-fast Cloud AI: Groq, Gemini, Nvidia, or OpenRouter."
             
             if new_model:
                 config = memory_manager.load_config()
@@ -819,7 +819,7 @@ class VoiceAssistantThread(QThread):
                         pass
                 return f"Model configured to {new_model}, Boss."
             else:
-                return "Which model would you like to switch to? You can say local LLaMA, Gemini, Groq, Nvidia, or OpenRouter."
+                return "Which model would you like to switch to? You can say Groq, Gemini, Nvidia, or OpenRouter."
 
         if "open google" in command or "search" in command:
             query = command.replace("search", "").replace("open google", "").strip()

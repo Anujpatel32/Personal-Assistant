@@ -105,6 +105,8 @@ def call_gemini(api_key, system_prompt, history, prompt, max_tokens=150, image_p
 
 def call_groq(api_key, system_prompt, history, prompt, max_tokens=150):
     url = "https://api.groq.com/openai/v1/chat/completions"
+    config = memory_manager.load_config()
+    model_name = config.get("groq_model") or "qwen/qwen3.8-27b"
     
     messages = [{"role": "system", "content": system_prompt}]
     for msg in history:
@@ -113,7 +115,7 @@ def call_groq(api_key, system_prompt, history, prompt, max_tokens=150):
     messages.append({"role": "user", "content": prompt})
     
     payload = {
-        "model": "openai/gpt-oss-20b",
+        "model": model_name,
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": 0.9
@@ -137,8 +139,11 @@ def call_groq(api_key, system_prompt, history, prompt, max_tokens=150):
             if choices:
                 msg = choices[0].get("message", {})
                 content = msg.get("content")
-                if content is not None:
+                if content:
                     return content.strip()
+                reasoning = msg.get("reasoning")
+                if reasoning:
+                    return reasoning.strip()
             return "Sorry, Groq returned an empty response. Please try again."
     except urllib.error.HTTPError as e:
         err_body = e.read().decode("utf-8", errors="ignore")
@@ -385,6 +390,9 @@ def call_gemini_stream(api_key, system_prompt, history, prompt, max_tokens=150, 
 
 def call_groq_stream(api_key, system_prompt, history, prompt, max_tokens=150):
     url = "https://api.groq.com/openai/v1/chat/completions"
+    config = memory_manager.load_config()
+    model_name = config.get("groq_model") or "qwen/qwen3.8-27b"
+
     messages = [{"role": "system", "content": system_prompt}]
     for msg in history:
         role = "user" if msg["sender"] == "user" else "assistant"
@@ -392,7 +400,7 @@ def call_groq_stream(api_key, system_prompt, history, prompt, max_tokens=150):
     messages.append({"role": "user", "content": prompt})
     
     payload = {
-        "model": "openai/gpt-oss-20b",
+        "model": model_name,
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": 0.9,
@@ -428,7 +436,7 @@ def call_groq_stream(api_key, system_prompt, history, prompt, max_tokens=150):
                         try:
                             data = json.loads(data_str)
                             delta = data["choices"][0]["delta"]
-                            if "content" in delta:
+                            if "content" in delta and delta["content"]:
                                 yield delta["content"]
                         except Exception:
                             pass
@@ -514,7 +522,7 @@ def call_nvidia_stream(api_key, system_prompt, history, prompt, max_tokens=150, 
                         try:
                             data = json.loads(data_str)
                             delta = data["choices"][0]["delta"]
-                            if "content" in delta:
+                            if "content" in delta and delta["content"]:
                                 yield delta["content"]
                         except Exception:
                             pass
@@ -627,17 +635,23 @@ def _get_provider_order(preferred_model: str) -> list:
 
 def _is_error_response(text: str) -> bool:
     """Checks if a string is an error/quota message from a cloud provider."""
-    if not text:
-        return True
+    if not text or not text.strip():
+        return False
     t_low = text.lower().strip()
     error_markers = [
         "model not found", "deprecated", "api key is invalid",
         "quota exceeded", "rate limit exceeded", "encountered an error communicating",
-        "error", "unauthorized", "timed out", "timed_out",
+        "unauthorized", "timed out", "timed_out",
         "authentication failed", "forbidden", "internal server error",
         "service unavailable", "bad gateway", "urlopen error", "getaddrinfo failed"
     ]
-    return any(marker in t_low for marker in error_markers)
+    if any(marker in t_low for marker in error_markers):
+        return True
+    if any(f"{p} error:" in t_low for p in ["gemini", "groq", "nvidia", "openrouter"]):
+        return True
+    if t_low.startswith("error (http") or t_low.startswith("error:"):
+        return True
+    return False
 
 def query_llm_stream(prompt, system_prompt, history=[], max_tokens=150, image_path=None):
     """
@@ -679,6 +693,8 @@ def query_llm_stream(prompt, system_prompt, history=[], max_tokens=150, image_pa
         try:
             stream_gen = fn(api_key)
             for chunk in stream_gen:
+                if not chunk:
+                    continue
                 if not had_valid_tokens:
                     if _is_error_response(chunk):
                         print(f"[CLOUD ROUTER] {provider.title()} error: {chunk.strip()}. Trying next cloud provider...", flush=True)

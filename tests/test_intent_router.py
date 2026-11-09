@@ -53,4 +53,18 @@ def test_create_folder_fast_path():
     assert res["data"]["tool"] == "create_folder"
     assert res["data"]["args"]["folder_name"] == "New Folder"
 
+def test_delete_folder_fast_path():
+    res = intent_router.route_command("delete the folder name anuj and the")
+    assert res["intent"] == "tool_call"
+    assert res["confidence"] == "fast_path"
+    assert res["data"]["tool"] == "delete_folder"
+    assert res["data"]["args"]["folder_name"] == "anuj"
+
+    res = intent_router.route_command("delete new folder from des")
+    assert res["intent"] == "tool_call"
+    assert res["confidence"] == "fast_path"
+    assert res["data"]["tool"] == "delete_folder"
+    assert res["data"]["args"]["folder_name"] == "New Folder"
+
+
 

@@ -551,15 +551,18 @@ def delete_named_folder(folder_name: str) -> str:
         user_home = os.path.expanduser("~")
         raw_name = folder_name.strip()
         sanitized = re.sub(r'[\\/*?:"<>|]', "", raw_name).strip()
-        clean_name = re.sub(r'^(?:the|my|a|an|folder|project|directory|workspace|app)\s+', '', sanitized.lower())
-        clean_name = re.sub(r'\s+(?:folder|project|directory|workspace|app)$', '', clean_name).strip()
+        clean_name = re.sub(r'^(?:the|my|a|an|folder|project|directory|workspace|app|named|called|name)\s+', '', sanitized.lower()).strip()
+        clean_name = re.sub(r'\b(?:from|on|in|at)\s+(?:the\s+|my\s+)?(?:desktop|des|screen)\b', '', clean_name).strip()
+        clean_name = re.sub(r'\b(?:and\s+the|and\s+that|please)\b', '', clean_name).strip()
+        if clean_name != "new folder" and not clean_name.startswith("new folder"):
+            clean_name = re.sub(r'\s+(?:folder|project|directory|workspace|app)$', '', clean_name).strip()
 
         if not clean_name:
             return "Please specify a project or folder name to delete."
 
         scan_paths = [
-            r"C:\Users\anujp\OneDrive\Desktop\P Space\Meow",
             get_desktop_path(),
+            r"C:\Users\anujp\OneDrive\Desktop\P Space\Meow",
             os.path.join(user_home, "Downloads"),
             os.path.join(user_home, "Documents"),
             os.path.join(user_home, "Pictures"),
@@ -605,19 +608,34 @@ def delete_named_folder(folder_name: str) -> str:
         if not target_dir_path:
             return f"I couldn't find a project or folder named '{folder_name}' to delete."
 
+        parent_dir = os.path.dirname(target_dir_path)
         escaped_path = target_dir_path.replace("'", "''")
         ps_cmd = f'Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory(\'{escaped_path}\', \'OnlyErrorDialogs\', \'SendToRecycleBin\')'
         creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         res = subprocess.run(["powershell", "-Command", ps_cmd], creationflags=creationflags, timeout=6)
 
         if res.returncode == 0 and not os.path.exists(target_dir_path):
-            return f"I have moved the project '{target_dir_name}' to your Recycle Bin."
+            # Notify Windows Shell of folder removal
+            try:
+                import ctypes
+                ctypes.windll.shell32.SHChangeNotify(0x0010, 0x0005, target_dir_path, None)
+                ctypes.windll.shell32.SHChangeNotify(0x1000, 0x0005, parent_dir, None)
+            except Exception:
+                pass
+            return f"I have moved the folder '{target_dir_name}' to the Recycle Bin."
         else:
             import shutil
             shutil.rmtree(target_dir_path, ignore_errors=True)
-            return f"I have deleted the project '{target_dir_name}'."
+            try:
+                import ctypes
+                ctypes.windll.shell32.SHChangeNotify(0x0010, 0x0005, target_dir_path, None)
+                ctypes.windll.shell32.SHChangeNotify(0x1000, 0x0005, parent_dir, None)
+            except Exception:
+                pass
+            return f"I have deleted the folder '{target_dir_name}'."
     except Exception as e:
         print(f"[PC CONTROL] delete_named_folder error: {e}")
+        return f"I ran into an issue deleting the folder '{folder_name}': {e}"
         return f"I ran into an issue deleting '{folder_name}': {e}"
 
 def delete_named_file(file_name: str) -> str:
@@ -685,29 +703,69 @@ def delete_named_file(file_name: str) -> str:
 
 # ═══════════════════════════════════════════════════════════
 
+def parse_delete_folder_name_from_command(cmd_clean):
+    """Extract folder name from natural language command like 'delete the folder name anuj and the'."""
+    cmd_lower = cmd_clean.strip().lower()
+
+    if not any(v in cmd_lower for v in ["delete", "remove", "trash", "recycle", "erase"]):
+        return None
+
+    # Strip location specifiers and speech artifacts ('from desktop', 'from des', 'in the des', 'and the')
+    loc_pattern = r'\b(?:from|on|in|at)\s+(?:the\s+|my\s+)?(?:desktop|des|screen)\b'
+    cleaned = re.sub(loc_pattern, '', cmd_lower)
+    cleaned = re.sub(r'\b(?:and\s+the|and\s+that|please)\b', '', cleaned).strip()
+
+    # 1. delete [the] folder/project/directory [named/called/name] <name>
+    m = re.search(r'(?:delete|remove|trash|recycle|erase)\s+(?:the\s+)?(?:folder|project|directory|workspace|app)\s+(?:named|called|name)\s+[\'"]?(.+?)[\'"]?$', cleaned)
+    if not m:
+        # 2. delete [the] folder/project/directory <name>
+        m = re.search(r'(?:delete|remove|trash|recycle|erase)\s+(?:the\s+)?(?:folder|project|directory|workspace|app)\s+[\'"]?(.+?)[\'"]?$', cleaned)
+    if not m:
+        # 3. delete [the] <name> folder/project/directory
+        m = re.search(r'(?:delete|remove|trash|recycle|erase)\s+(?:the\s+)?[\'"]?(.+?)[\'"]?\s+(?:folder|project|directory|workspace|app)$', cleaned)
+    if not m:
+        # 4. delete <name>
+        m = re.search(r'(?:delete|remove|trash|recycle|erase)\s+[\'"]?(.+?)[\'"]?$', cleaned)
+
+    if m:
+        target = m.group(1).strip()
+        target = re.sub(r'^(?:the|my|a|an|folder|project|named|called|name)\s+', '', target).strip()
+        if target.lower() == "new":
+            target = "New Folder"
+        elif not target.lower().startswith("new folder"):
+            target = re.sub(r'\s+(?:folder|project|directory)$', '', target).strip()
+
+        if target and target not in ['it', 'this', 'that', 'all', 'history', 'cache', 'memory', 'tasks', 'something']:
+            return target
+
+    return None
+
 def parse_folder_name_from_command(cmd_clean):
     """Extract folder name from natural language command like 'create a folder named anuj on the desktop'."""
     cmd_lower = cmd_clean.strip().lower()
 
-    # Check if this command is asking to create a folder
+    # Never treat a deletion command as a creation command!
+    if any(v in cmd_lower for v in ["delete", "remove", "trash", "recycle", "erase", "destroy"]):
+        return None
+
+    # Check if this command is asking to create a folder (must have an explicit creation action)
     has_action = any(kw in cmd_lower for kw in [
         "create folder", "create a folder", "create new folder", "create a new folder",
         "make folder", "make a folder", "make new folder", "make a new folder",
-        "build folder", "build a folder", "add folder", "add a folder",
-        "new folder"
+        "build folder", "build a folder", "add folder", "add a folder"
     ]) or bool(re.search(r"\b(create|make|build|add)\s+(?:a\s+|new\s+|a\s+new\s+)?folder\b", cmd_lower)) or bool(re.search(r"\b(create|make|build)\s+[\w\-\s]+?\s+folder\b", cmd_lower))
 
     if not has_action:
         return None
 
     # Strip desktop location phrases
-    loc_removed = re.sub(r"\b(on|in|at)\s+(the\s+|my\s+)?desktop\b", "", cmd_lower).strip()
+    loc_removed = re.sub(r"\b(?:on|in|at)\s+(?:the\s+|my\s+)?(?:desktop|des|screen)\b", "", cmd_lower).strip()
 
-    # 1. folder named / called <name>
-    m = re.search(r"\bfolder\s+(?:named|called)\s+['\"]?([^'\"]+?)['\"]?(?:\s|$)", loc_removed)
+    # 1. folder named / called / name <name>
+    m = re.search(r"\bfolder\s+(?:named|called|name)\s+['\"]?([^'\"]+?)['\"]?(?:\s|$)", loc_removed)
     if not m:
-        # 2. named / called <name> folder
-        m = re.search(r"\b(?:named|called)\s+['\"]?([^'\"]+?)['\"]?(?:\s+folder|\s|$)", loc_removed)
+        # 2. named / called / name <name> folder
+        m = re.search(r"\b(?:named|called|name)\s+['\"]?([^'\"]+?)['\"]?(?:\s+folder|\s|$)", loc_removed)
     if not m:
         # 3. create/make/build [a] [new] folder <name>
         m = re.search(r"(?:create|make|build|add)\s+(?:a\s+)?(?:new\s+)?folder\s+['\"]?([^'\"]+?)['\"]?$", loc_removed)
@@ -717,7 +775,7 @@ def parse_folder_name_from_command(cmd_clean):
 
     if m:
         name = m.group(1).strip()
-        name = re.sub(r"^(named|called)\s+", "", name).strip()
+        name = re.sub(r"^(named|called|name)\s+", "", name).strip()
         if name and name not in ["me", "today", "schedule", "this", "it", "a", "new"]:
             return name
 
@@ -997,13 +1055,9 @@ def handle_pc_command(command):
         return control_window("close")
 
     # 6. Project, Folder & File Deletion
-    del_folder_match = re.search(r"(?:delete|remove|trash|recycle|erase)\s+(?:the\s+)?(?:folder|project|directory|workspace|app)\s+(?:named\s+)?(.+)", cmd_clean)
-    if not del_folder_match:
-        del_folder_match = re.search(r"(?:delete|remove|trash|recycle|erase)\s+(.+?)\s+(?:folder|project|directory|workspace|app)", cmd_clean)
-    if del_folder_match:
-        f_target = del_folder_match.group(1).strip()
-        if f_target and f_target not in {"it", "this", "that"}:
-            return delete_named_folder(f_target)
+    del_folder_name = parse_delete_folder_name_from_command(cmd_clean)
+    if del_folder_name:
+        return delete_named_folder(del_folder_name)
 
     # 6a. Explicit File Deletion
     del_file_match = re.search(r"(?:delete|remove|trash|recycle|erase)\s+(?:the\s+)?file\s+(?:named\s+)?(.+)", cmd_clean)

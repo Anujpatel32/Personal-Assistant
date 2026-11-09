@@ -107,7 +107,24 @@ def classify_intent(command: str) -> dict:
                     },
                 }
 
-    # 2b. Fast-path: folder creation tool
+    # 2b. Fast-path: folder deletion tool
+    try:
+        from pc_control import parse_delete_folder_name_from_command
+        folder_to_delete = parse_delete_folder_name_from_command(cmd_lower)
+        if folder_to_delete is not None:
+            return {
+                "intent": "tool_call",
+                "confidence": "fast_path",
+                "data": {
+                    "tool": "delete_folder",
+                    "args": {"folder_name": folder_to_delete},
+                    "original": cmd,
+                },
+            }
+    except Exception:
+        pass
+
+    # 2c. Fast-path: folder creation tool
     try:
         from pc_control import parse_folder_name_from_command
         folder_to_create = parse_folder_name_from_command(cmd_lower)

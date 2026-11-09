@@ -139,6 +139,14 @@ def _tool_create_folder(folder_name: str):
     return pc_control.create_desktop_folder(folder_name)
 
 
+@register_tool("delete_folder",
+               "Delete or recycle a desktop or local folder with the given name",
+               ["folder_name"])
+def _tool_delete_folder(folder_name: str):
+    import pc_control
+    return pc_control.delete_named_folder(folder_name)
+
+
 # ── Web & Research ────────────────────────────────────────────────────────────
 @register_tool("web_search",
                "Search the web and return a summary of results for a query",

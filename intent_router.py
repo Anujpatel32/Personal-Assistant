@@ -107,6 +107,23 @@ def classify_intent(command: str) -> dict:
                     },
                 }
 
+    # 2b. Fast-path: folder creation tool
+    try:
+        from pc_control import parse_folder_name_from_command
+        folder_to_create = parse_folder_name_from_command(cmd_lower)
+        if folder_to_create is not None:
+            return {
+                "intent": "tool_call",
+                "confidence": "fast_path",
+                "data": {
+                    "tool": "create_folder",
+                    "args": {"folder_name": folder_to_create},
+                    "original": cmd,
+                },
+            }
+    except Exception:
+        pass
+
     # 3. Fast-path: music
     for pattern in _FAST_PATHS["music"]:
         match = re.search(pattern, cmd_lower)

@@ -7,22 +7,34 @@ import pyautogui
 import pygetwindow as gw
 
 def get_desktop_path():
-    # Prioritize original/local desktop (non-OneDrive)
-    local_desktop = os.path.join(os.path.expanduser("~"), "Desktop")
-    if os.path.exists(local_desktop):
-        return local_desktop
-        
+    """Returns the true, active Windows Desktop path (OneDrive-aware and registry-verified)."""
+    # 1. Primary source of truth: Windows Shell registry (where Windows Explorer actually renders the desktop)
     try:
         import winreg
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders")
-        val, type_ = winreg.QueryValueEx(key, "Desktop")
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+        )
+        val, _ = winreg.QueryValueEx(key, "Desktop")
         winreg.CloseKey(key)
-        return os.path.expandvars(val)
+        reg_path = os.path.expandvars(val)
+        if os.path.exists(reg_path) and os.access(reg_path, os.W_OK):
+            return reg_path
     except Exception:
-        path1 = os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop")
-        if os.path.exists(path1):
-            return path1
-        return os.path.join(os.path.expanduser("~"), "Desktop")
+        pass
+
+    # 2. Check OneDrive Desktop (common on Windows 10/11)
+    user_home = os.path.expanduser("~")
+    onedrive_desktop = os.path.join(user_home, "OneDrive", "Desktop")
+    if os.path.exists(onedrive_desktop) and os.access(onedrive_desktop, os.W_OK):
+        return onedrive_desktop
+
+    # 3. Check standard User Desktop
+    local_desktop = os.path.join(user_home, "Desktop")
+    if os.path.exists(local_desktop) and os.access(local_desktop, os.W_OK):
+        return local_desktop
+
+    return onedrive_desktop if os.path.exists(onedrive_desktop) else local_desktop
 
 def ensure_dirs():
     pass
@@ -673,24 +685,78 @@ def delete_named_file(file_name: str) -> str:
 
 # ═══════════════════════════════════════════════════════════
 
+def parse_folder_name_from_command(cmd_clean):
+    """Extract folder name from natural language command like 'create a folder named anuj on the desktop'."""
+    cmd_lower = cmd_clean.strip().lower()
+
+    # Check if this command is asking to create a folder
+    has_action = any(kw in cmd_lower for kw in [
+        "create folder", "create a folder", "create new folder", "create a new folder",
+        "make folder", "make a folder", "make new folder", "make a new folder",
+        "build folder", "build a folder", "add folder", "add a folder",
+        "new folder"
+    ]) or bool(re.search(r"\b(create|make|build|add)\s+(?:a\s+|new\s+|a\s+new\s+)?folder\b", cmd_lower)) or bool(re.search(r"\b(create|make|build)\s+[\w\-\s]+?\s+folder\b", cmd_lower))
+
+    if not has_action:
+        return None
+
+    # Strip desktop location phrases
+    loc_removed = re.sub(r"\b(on|in|at)\s+(the\s+|my\s+)?desktop\b", "", cmd_lower).strip()
+
+    # 1. folder named / called <name>
+    m = re.search(r"\bfolder\s+(?:named|called)\s+['\"]?([^'\"]+?)['\"]?(?:\s|$)", loc_removed)
+    if not m:
+        # 2. named / called <name> folder
+        m = re.search(r"\b(?:named|called)\s+['\"]?([^'\"]+?)['\"]?(?:\s+folder|\s|$)", loc_removed)
+    if not m:
+        # 3. create/make/build [a] [new] folder <name>
+        m = re.search(r"(?:create|make|build|add)\s+(?:a\s+)?(?:new\s+)?folder\s+['\"]?([^'\"]+?)['\"]?$", loc_removed)
+    if not m:
+        # 4. create/make/build [a] [new] <name> folder
+        m = re.search(r"(?:create|make|build|add)\s+(?:a\s+)?(?:new\s+)?['\"]?([^'\"]+?)['\"]?\s+folder$", loc_removed)
+
+    if m:
+        name = m.group(1).strip()
+        name = re.sub(r"^(named|called)\s+", "", name).strip()
+        if name and name not in ["me", "today", "schedule", "this", "it", "a", "new"]:
+            return name
+
+    return "New Folder"
+
 def create_desktop_folder(folder_name):
     try:
         # Sanitize folder name
         folder_name = re.sub(r'[\\/*?:"<>|]', "", folder_name).strip()
         if not folder_name:
-            return "Please provide a valid folder name."
-            
+            folder_name = "New Folder"
+
         desktop_path = get_desktop_path()
         target_path = os.path.join(desktop_path, folder_name)
-        
+
+        # If folder already exists, increment if default New Folder, or report existing
         if os.path.exists(target_path):
-            return f"Folder named '{folder_name}' already exists on your desktop."
-            
-        os.makedirs(target_path)
+            if folder_name.lower().startswith("new folder"):
+                counter = 2
+                while os.path.exists(os.path.join(desktop_path, f"{folder_name} ({counter})")):
+                    counter += 1
+                folder_name = f"{folder_name} ({counter})"
+                target_path = os.path.join(desktop_path, folder_name)
+            else:
+                return f"A folder named '{folder_name}' already exists on your desktop."
+
+        os.makedirs(target_path, exist_ok=True)
+
+        # Notify Windows Shell so it immediately refreshes the desktop display
+        try:
+            import ctypes
+            ctypes.windll.shell32.SHChangeNotify(0x0008, 0x0005, target_path, None)
+        except Exception:
+            pass
+
         return f"I have created the folder '{folder_name}' on your desktop."
     except Exception as e:
         print(f"[PC CONTROL ERROR] Folder creation failed: {e}")
-    return "I was unable to create the folder."
+        return f"I was unable to create the folder: {e}"
 
 def search_local_files_advanced(query):
     query = query.strip()
@@ -960,13 +1026,9 @@ def handle_pc_command(command):
             return resp
 
     # 6b. Folder Creation
-    folder_match = re.search(r"(?:create|make|build)\s+(?:a\s+)?(?:new\s+)?folder\s+(?:named\s+)?(.+)", cmd_clean)
-    if not folder_match:
-        folder_match = re.search(r"(?:create|make|build)\s+(?:a\s+)?(?:new\s+)?(.+?)\s+folder", cmd_clean)
-    if folder_match:
-        folder_name = folder_match.group(1).strip()
-        if folder_name not in ["me", "today", "schedule", "this", "it"]:
-            return create_desktop_folder(folder_name)
+    detected_folder = parse_folder_name_from_command(cmd_clean)
+    if detected_folder is not None:
+        return create_desktop_folder(detected_folder)
 
     # 6c. Open System or Named Folder
     open_folder_match = re.search(r"(?:open|show|view|explore)\s+(?:the\s+)?folder\s+(?:named\s+)?(.+)", cmd_clean)

@@ -1,7 +1,10 @@
 # GitHub Monitor Plugin
+import logging
 import urllib.request
 import json
 import re
+
+logger = logging.getLogger("meow.plugins")
 
 PLUGIN_NAME = "GitHub Monitor"
 PLUGIN_DESCRIPTION = "Reads the latest commit logs from public repositories."
@@ -9,6 +12,7 @@ PLUGIN_VERSION = "1.0.0"
 
 def register(mascot, app, pc_control):
     logger.info("[GITHUB PLUGIN] Registered successfully!")
+
 def handle_command(command):
     if "github commit" in command.lower() or "latest commit" in command.lower():
         try:

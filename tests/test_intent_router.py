@@ -40,3 +40,17 @@ def test_chat_fast_path():
     assert res["intent"] == "chat"
     assert res["confidence"] == "fast_path"
 
+def test_create_folder_fast_path():
+    res = intent_router.route_command("create a folder named anuj on the desktop")
+    assert res["intent"] == "tool_call"
+    assert res["confidence"] == "fast_path"
+    assert res["data"]["tool"] == "create_folder"
+    assert res["data"]["args"]["folder_name"] == "anuj"
+
+    res = intent_router.route_command("create a folder in desktop")
+    assert res["intent"] == "tool_call"
+    assert res["confidence"] == "fast_path"
+    assert res["data"]["tool"] == "create_folder"
+    assert res["data"]["args"]["folder_name"] == "New Folder"
+
+

@@ -12,23 +12,9 @@ import logging
 logger = logging.getLogger("meow.tools")
 
 
-def get_desktop_path():
-    # Prioritize original/local desktop (non-OneDrive)
-    local_desktop = os.path.join(os.path.expanduser("~"), "Desktop")
-    if os.path.exists(local_desktop):
-        return local_desktop
-        
-    try:
-        import winreg
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders")
-        val, type_ = winreg.QueryValueEx(key, "Desktop")
-        winreg.CloseKey(key)
-        return os.path.expandvars(val)
-    except Exception:
-        path1 = os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop")
-        if os.path.exists(path1):
-            return path1
-        return os.path.join(os.path.expanduser("~"), "Desktop")
+import pc_control
+get_desktop_path = pc_control.get_desktop_path
+
 
 def search_duckduckgo(query, max_results=5):
     url = "https://html.duckduckgo.com/html/"

@@ -141,7 +141,38 @@ def set_speaking_active(active: bool):
     global _is_speaking_active
     _is_speaking_active = bool(active)
 
+def stop():
+    """Immediately stops all active speech playback across all backends (Pygame, SAPI) and purges queues."""
+    global _is_speaking_active
+    _is_speaking_active = False
+
+    if flask_app is not None:
+        flask_app.stop_speaking_flag = True
+
+    # 1. Stop Pygame mixer
+    try:
+        import pygame
+        if pygame.mixer.get_init():
+            pygame.mixer.music.stop()
+            try:
+                pygame.mixer.music.unload()
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[TTS STOP PYGAME ERROR]: {e}", flush=True)
+
+    # 2. Stop SAPI voice
+    try:
+        voice = get_main_sapi_voice()
+        if voice is not None:
+            voice.Speak("", 2)  # SVSFPurgeBeforeSpeak = 2
+    except Exception as e:
+        print(f"[TTS STOP SAPI ERROR]: {e}", flush=True)
+
 def play_sapi(text, on_start_speaking=None):
+    if flask_app and getattr(flask_app, "stop_speaking_flag", False):
+        return
+
     try:
         import pythoncom
         pythoncom.CoInitialize()
@@ -150,7 +181,6 @@ def play_sapi(text, on_start_speaking=None):
             import win32com.client
             voice = win32com.client.Dispatch("SAPI.SpVoice")
 
-        flask_app.stop_speaking_flag = False
         with flask_app.active_engine_lock:
             flask_app.active_engine = voice
 
@@ -160,15 +190,15 @@ def play_sapi(text, on_start_speaking=None):
 
         voice.Speak(text, 1)  # async speak
 
-        while not flask_app.stop_speaking_flag:
+        while not getattr(flask_app, "stop_speaking_flag", False):
             try:
                 if voice.Status.RunningState != 2:
                     break
             except Exception:
                 break
-            time.sleep(0.04)
+            time.sleep(0.03)
 
-        if flask_app.stop_speaking_flag:
+        if getattr(flask_app, "stop_speaking_flag", False):
             try:
                 voice.Speak("", 2)  # purge
             except Exception:
@@ -185,12 +215,19 @@ def play_sapi(text, on_start_speaking=None):
 # Audio File Playback (used by ElevenLabs & Kokoro)
 # ---------------------------------------------------------------------------
 def play_audio_file(file_path, on_start_speaking=None):
+    if flask_app and getattr(flask_app, "stop_speaking_flag", False):
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass
+        return
+
     import pygame
     try:
         if not pygame.mixer.get_init():
             pygame.mixer.init()
         pygame.mixer.music.load(file_path)
-        flask_app.stop_speaking_flag = False
 
         set_speaking_active(True)
         if on_start_speaking:
@@ -198,10 +235,10 @@ def play_audio_file(file_path, on_start_speaking=None):
 
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy():
-            if flask_app.stop_speaking_flag:
+            if flask_app and getattr(flask_app, "stop_speaking_flag", False):
                 pygame.mixer.music.stop()
                 break
-            time.sleep(0.04)
+            time.sleep(0.03)
         pygame.mixer.music.unload()
     except Exception as e:
         print(f"[AUDIO PLAY ERROR]: {e}", flush=True)

@@ -305,6 +305,11 @@ def wake_up():
 def api_stop():
     global stop_speaking_flag
     stop_speaking_flag = True
+    try:
+        import tts_engine
+        tts_engine.stop()
+    except Exception as e:
+        print(f"[API STOP TTS ERROR]: {e}")
     if mascot_widget_ref is not None:
         try:
             mascot_widget_ref.interrupt_speech()

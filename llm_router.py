@@ -29,7 +29,7 @@ llm = None
 
 # --- CLOUD LLM API INTEGRATIONS ---
 def call_gemini(api_key, system_prompt, history, prompt, max_tokens=150, image_path=None):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
     
     contents = []
     for msg in history:
@@ -307,7 +307,7 @@ def call_openrouter(api_key, system_prompt, history, prompt, max_tokens=150):
 
 
 def call_gemini_stream(api_key, system_prompt, history, prompt, max_tokens=150, image_path=None):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?key={api_key}"
     
     contents = []
     for msg in history:

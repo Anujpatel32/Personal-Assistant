@@ -1160,6 +1160,12 @@ class MascotWidget(QWidget):
 
     def is_currently_speaking(self):
         try:
+            if tts_engine.is_speaking():
+                return True
+        except Exception:
+            pass
+
+        try:
             import pygame
             if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
                 return True
@@ -1172,8 +1178,12 @@ class MascotWidget(QWidget):
                 return True
         except Exception:
             pass
+
+        if hasattr(self, 'backend_thread') and self.backend_thread:
+            if not self.backend_thread.speech_queue.empty() or not self.backend_thread.audio_queue.empty():
+                return True
             
-        return self.state in ["speaking", "happy", "sad", "angry"]
+        return self.state in ["speaking", "thinking", "happy", "sad", "angry"]
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1199,7 +1209,13 @@ class MascotWidget(QWidget):
         super().keyPressEvent(event)
 
     def interrupt_speech(self):
-        # Stop SAPI voice
+        # 1. Stop hardware audio playback immediately
+        try:
+            tts_engine.stop()
+        except Exception as e:
+            print(f"[INTERRUPT TTS STOP ERROR]: {e}", flush=True)
+
+        # 2. Stop SAPI voice directly if active
         try:
             voice = get_main_sapi_voice()
             if voice:
@@ -1207,15 +1223,16 @@ class MascotWidget(QWidget):
         except Exception as e:
             print(f"[INTERRUPT MAIN ERROR]: {e}", flush=True)
             
-        # Call backend thread's clear_speech to clear queues and stop audio files
+        # 3. Call backend thread's clear_speech to clear queues and cancel workers
         try:
             if hasattr(self, 'backend_thread') and self.backend_thread:
                 self.backend_thread.clear_speech()
         except Exception as e:
             print(f"[INTERRUPT BACKEND ERROR]: {e}", flush=True)
             
-        # Reset state back to listening so user can speak immediately
-        self.set_state("listening")
+        # 4. Reset state back to listening so user can speak immediately
+        active = getattr(self.backend_thread, "active_mode", True) if hasattr(self, 'backend_thread') and self.backend_thread else True
+        self.set_state("listening" if active else "idle")
 
 
     def mouseMoveEvent(self, event):

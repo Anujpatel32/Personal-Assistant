@@ -94,11 +94,39 @@ class SpeechQueueWorker(QThread):
         self.audio_queue = audio_queue
         self.status_callback = status_callback
         self.running = True
-        
+        self.generation_id = 0
+
+    def put_speech(self, gen_id, text):
+        if not getattr(flask_app, "stop_speaking_flag", False) and gen_id == self.generation_id:
+            self.speech_queue.put((gen_id, text))
+
+    def clear_queue(self):
+        self.generation_id += 1
+        while not self.speech_queue.empty():
+            try:
+                self.speech_queue.get_nowait()
+                self.speech_queue.task_done()
+            except Exception:
+                pass
+
+        while not self.audio_queue.empty():
+            try:
+                item = self.audio_queue.get_nowait()
+                data = item[-1] if isinstance(item, tuple) else item
+                if isinstance(data, str) and (data.endswith('.wav') or data.endswith('.mp3')):
+                    import os
+                    if os.path.exists(data):
+                        os.remove(data)
+                self.audio_queue.task_done()
+            except Exception:
+                pass
+
+        tts_engine.stop()
+
     def run(self):
         import pythoncom
         import time
-        
+
         # Start synthesis worker thread in background
         def synthesis_loop():
             import pythoncom
@@ -108,23 +136,33 @@ class SpeechQueueWorker(QThread):
             _cached_voice_param = None
             while self.running:
                 try:
-                    text = self.speech_queue.get(timeout=1.0)
-                    if text == "__STOP__":
+                    item = self.speech_queue.get(timeout=0.5)
+                    if item == "__STOP__":
                         self.speech_queue.task_done()
                         continue
-                        
+
+                    if isinstance(item, tuple) and len(item) == 2:
+                        gen_id, text = item
+                    else:
+                        gen_id, text = self.generation_id, item
+
+                    if gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False):
+                        self.speech_queue.task_done()
+                        continue
+
                     config = memory_manager.load_config()
                     selected_tts = config.get("selected_tts", "sapi")
-                    
+
                     if selected_tts == "sapi":
                         # SAPI is fast, pass text directly
-                        self.audio_queue.put(("sapi", text))
+                        if gen_id == self.generation_id and not getattr(flask_app, "stop_speaking_flag", False):
+                            self.audio_queue.put((gen_id, "sapi", text))
                     elif selected_tts == "kokoro":
                         # Pre-synthesize Kokoro WAV file in background
                         try:
                             kokoro = get_kokoro()
                             kokoro_voice = config.get("kokoro_voice", "af_sarah")
-                            
+
                             voice_param = kokoro_voice
                             if kokoro_voice == "custom_mix":
                                 voice_mix = config.get("kokoro_voice_mix", {})
@@ -150,32 +188,55 @@ class SpeechQueueWorker(QThread):
                                                 voice_param = blended_vector
                                                 _cached_voice_mix = dict(voice_mix)
                                                 _cached_voice_param = blended_vector
-                            
+
+                            if gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False):
+                                self.speech_queue.task_done()
+                                continue
+
                             samples, sample_rate = kokoro.create(
                                 text,
                                 voice=voice_param,
                                 speed=1.0,
                                 lang="en-us"
                             )
+
+                            if gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False):
+                                self.speech_queue.task_done()
+                                continue
+
                             import soundfile as sf
                             import os
                             temp_dir = os.environ.get("TEMP", "")
                             file_path = os.path.join(temp_dir, f"temp_kokoro_{counter}_{int(time.time())}.wav")
                             sf.write(file_path, samples, sample_rate)
                             counter = (counter + 1) % 50
-                            
-                            self.audio_queue.put(("file", file_path))
+
+                            if gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False):
+                                try:
+                                    if os.path.exists(file_path):
+                                        os.remove(file_path)
+                                except Exception:
+                                    pass
+                                self.speech_queue.task_done()
+                                continue
+
+                            self.audio_queue.put((gen_id, "file", file_path))
                         except Exception as ex:
                             print(f"[TTS SYNTHESIS ERROR] Kokoro failed: {ex}", flush=True)
-                            self.audio_queue.put(("sapi", text))
+                            if gen_id == self.generation_id and not getattr(flask_app, "stop_speaking_flag", False):
+                                self.audio_queue.put((gen_id, "sapi", text))
                     else:
                         # ElevenLabs pre-synthesis
                         try:
                             api_key = config.get("elevenlabs_api_key", "")
                             voice_id = config.get("elevenlabs_voice_id", "21m00Tcm4TlvDq8ikWAM")
                             if not api_key:
-                                self.audio_queue.put(("sapi", text))
+                                if gen_id == self.generation_id and not getattr(flask_app, "stop_speaking_flag", False):
+                                    self.audio_queue.put((gen_id, "sapi", text))
                             else:
+                                if gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False):
+                                    self.speech_queue.task_done()
+                                    continue
                                 import urllib.request
                                 import json
                                 import ssl
@@ -199,30 +260,65 @@ class SpeechQueueWorker(QThread):
                                 context = ssl._create_unverified_context()
                                 with urllib.request.urlopen(req, timeout=15, context=context) as response:
                                     audio_data = response.read()
+
+                                if gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False):
+                                    self.speech_queue.task_done()
+                                    continue
+
                                 temp_dir = os.environ.get("TEMP", "")
                                 file_path = os.path.join(temp_dir, f"temp_eleven_{counter}_{int(time.time())}.mp3")
                                 with open(file_path, "wb") as f:
                                     f.write(audio_data)
                                 counter = (counter + 1) % 50
-                                self.audio_queue.put(("file", file_path))
+
+                                if gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False):
+                                    try:
+                                        if os.path.exists(file_path):
+                                            os.remove(file_path)
+                                    except Exception:
+                                        pass
+                                    self.speech_queue.task_done()
+                                    continue
+
+                                self.audio_queue.put((gen_id, "file", file_path))
                         except Exception as ex:
                             print(f"[TTS SYNTHESIS ERROR] ElevenLabs failed: {ex}", flush=True)
-                            self.audio_queue.put(("sapi", text))
-                            
+                            if gen_id == self.generation_id and not getattr(flask_app, "stop_speaking_flag", False):
+                                self.audio_queue.put((gen_id, "sapi", text))
+
                     self.speech_queue.task_done()
                 except queue.Empty:
                     continue
                 except Exception as e:
                     print(f"[SYNTHESIS LOOP ERROR]: {e}", flush=True)
                     continue
-                    
+
         threading.Thread(target=synthesis_loop, daemon=True).start()
-        
+
         # Main playback loop
         pythoncom.CoInitialize()
         while self.running:
             try:
-                msg_type, data = self.audio_queue.get(timeout=1.0)
+                item = self.audio_queue.get(timeout=0.5)
+                if isinstance(item, tuple) and len(item) == 3:
+                    gen_id, msg_type, data = item
+                elif isinstance(item, tuple) and len(item) == 2:
+                    gen_id, (msg_type, data) = self.generation_id, item
+                else:
+                    self.audio_queue.task_done()
+                    continue
+
+                if gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False):
+                    if msg_type == "file":
+                        try:
+                            import os
+                            if os.path.exists(data):
+                                os.remove(data)
+                        except Exception:
+                            pass
+                    self.audio_queue.task_done()
+                    continue
+
                 if self.status_callback:
                     self.status_callback("speaking")
                 if msg_type == "sapi":
@@ -243,9 +339,6 @@ class SpeechQueueWorker(QThread):
             except Exception as e:
                 print(f"[PLAYBACK LOOP ERROR]: {e}", flush=True)
                 continue
-            except Exception as e:
-                print(f"[PLAYBACK LOOP ERROR]: {e}", flush=True)
-                continue
 
 class VoiceAssistantThread(QThread):
     status_changed = Signal(str)      # 'idle', 'listening', 'thinking', 'speaking', 'happy', 'sad', 'angry', 'sleeping'
@@ -258,6 +351,9 @@ class VoiceAssistantThread(QThread):
         self.active_mode = False
         self.is_resting = True
         self.dictation_mode = False
+        self.generation_id = 0
+        import collections
+        self._spoken_phrases = collections.deque(maxlen=20)
         
         self.speech_queue = queue.Queue()
         self.audio_queue = queue.Queue()
@@ -287,6 +383,35 @@ class VoiceAssistantThread(QThread):
         self.recognizer.dynamic_energy_ratio = 1.5
         self.recognizer.pause_threshold = 1.0  # Allow slightly longer pauses (default 0.8)
 
+    def _record_spoken_text(self, text):
+        if not text:
+            return
+        cleaned = re.sub(r'[^a-z0-9\s]', '', text.lower()).strip()
+        if cleaned:
+            self._spoken_phrases.append(cleaned)
+
+    def _is_self_echo(self, command):
+        if not command:
+            return False
+        cmd_clean = re.sub(r'[^a-z0-9\s]', '', command.lower()).strip()
+        if not cmd_clean:
+            return False
+
+        # Short command with explicit user intent/stop is not echo
+        cmd_words = cmd_clean.split()
+        if len(cmd_words) <= 2 and any(w in cmd_clean for w in ["stop", "wake", "sleep", "save", "send", "quiet", "shut"]):
+            return False
+
+        for phrase in list(self._spoken_phrases):
+            if cmd_clean in phrase or phrase in cmd_clean:
+                return True
+            phrase_words = set(phrase.split())
+            if len(cmd_words) >= 3 and phrase_words:
+                common = phrase_words.intersection(cmd_words)
+                if len(common) / len(cmd_words) >= 0.7:
+                    return True
+        return False
+
     def add_to_history(self, user_text, assistant_text, reasoning_details=None):
         self.chat_history.append({"sender": "user", "text": user_text})
         ast_msg = {"sender": "assistant", "text": assistant_text}
@@ -299,31 +424,170 @@ class VoiceAssistantThread(QThread):
         self._awake_until = time.time() + self._STAY_AWAKE_SECS
 
     def clear_speech(self):
-        flask_app.stop_speaking_flag = True
-        
-        # Clear speech queue
+        if flask_app:
+            flask_app.stop_speaking_flag = True
+
+        self.generation_id += 1
+        if hasattr(self, 'speech_worker') and self.speech_worker:
+            self.speech_worker.clear_queue()
+
         while not self.speech_queue.empty():
-            try: self.speech_queue.get_nowait()
-            except Exception: pass
-            
-        # Clear audio queue and delete temporary synthesized files
+            try:
+                self.speech_queue.get_nowait()
+            except Exception:
+                pass
+
         while not self.audio_queue.empty():
             try:
-                msg_type, data = self.audio_queue.get_nowait()
-                if msg_type == "file":
+                item = self.audio_queue.get_nowait()
+                data = item[-1] if isinstance(item, tuple) else item
+                if isinstance(data, str) and (data.endswith('.wav') or data.endswith('.mp3')):
                     import os
                     if os.path.exists(data):
                         os.remove(data)
-            except Exception: pass
-            
-        import pygame
+            except Exception:
+                pass
+
+        tts_engine.stop()
+
+    def _process_command_worker(self, command, gen_id):
         try:
-            if pygame.mixer.get_init():
-                pygame.mixer.music.stop()
-        except Exception: pass
-        import time
-        time.sleep(0.15)
-        flask_app.stop_speaking_flag = False
+            self.status_changed.emit("thinking")
+
+            # Voice 2.0 — check for style-change command before LLM call
+            style_key, style_msg = voice_personality.detect_style_change(command)
+            if style_key:
+                if gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False):
+                    return
+                self.status_changed.emit("speaking")
+                self._record_spoken_text(style_msg)
+                self.speech_worker.put_speech(gen_id, style_msg)
+                return
+
+            response = self.process_assistant_logic(command)
+
+            if gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False):
+                return
+
+            import types
+            if isinstance(response, types.GeneratorType):
+                # Real-time streaming response loop
+                accumulated_text = ""
+                sentence_buffer = ""
+                first_dispatched = False
+
+                try:
+                    for chunk in response:
+                        if gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False):
+                            break
+                        accumulated_text += chunk
+                        sentence_buffer += chunk
+
+                        # Emit to UI in real-time token-by-token
+                        self.response_generated.emit(accumulated_text, True)
+
+                        # Fast-start: dispatch first phrase early on comma or punctuation to eliminate silence
+                        if not first_dispatched:
+                            if re.search(r'[.!?]', sentence_buffer) or (len(sentence_buffer.split()) >= 4 and re.search(r'[,;:\n]', sentence_buffer)):
+                                parts = re.split(r'(?<=[.!?,;:\n])', sentence_buffer, maxsplit=1)
+                                if len(parts) > 1 and parts[0].strip():
+                                    piece = parts[0].strip()
+                                    self._record_spoken_text(piece)
+                                    self.speech_worker.put_speech(gen_id, piece)
+                                    sentence_buffer = parts[1]
+                                    first_dispatched = True
+                                    continue
+
+                        # Split completed sentences immediately upon finding punctuation (excluding common abbreviations)
+                        sentences = re.split(r'(?<=[.!?])', sentence_buffer)
+                        if len(sentences) > 1:
+                            new_buffer = ""
+                            for s in sentences[:-1]:
+                                s_clean = s.strip()
+                                words = s_clean.split()
+                                if words and words[-1].lower() in ["mr.", "mrs.", "dr.", "ms.", "st.", "e.g.", "i.e.", "vs."]:
+                                    new_buffer += s
+                                else:
+                                    if s_clean:
+                                        self._record_spoken_text(s_clean)
+                                        self.speech_worker.put_speech(gen_id, s_clean)
+                                        first_dispatched = True
+                            sentence_buffer = new_buffer + sentences[-1]
+                except Exception as loop_err:
+                    print(f"[THREAD GENERATOR LOOP ERROR]: {loop_err}", flush=True)
+                    if not accumulated_text.strip():
+                        accumulated_text = "Sorry, I encountered an error receiving the response stream."
+                        self.response_generated.emit(accumulated_text, False)
+                        self.speech_worker.put_speech(gen_id, accumulated_text)
+
+                # Flush remaining buffer
+                if sentence_buffer.strip() and not (gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False)):
+                    rem = sentence_buffer.strip()
+                    self._record_spoken_text(rem)
+                    self.speech_worker.put_speech(gen_id, rem)
+
+                # Save response to history
+                if accumulated_text.strip():
+                    self.add_to_history(command, accumulated_text, getattr(llm_router, "_last_reasoning_details", None))
+
+                # Auto-jump cursor to line number if mentioned in the response
+                is_nav_command = any(phrase in command.lower() for phrase in ["jump to", "go to", "highlight", "move to", "navigate to"]) or re.search(r"\bline\s+(?:number\s+)?(\d+)\b", command.lower())
+                if not is_nav_command:
+                    line_match = re.search(r"\bline\s+(?:number\s+|no\.\s+)?(\d+)\b", accumulated_text.lower())
+                    if line_match:
+                        line_num = line_match.group(1)
+                        def delayed_jump():
+                            time.sleep(2.5)
+                            import pc_control
+                            pc_control.navigate_to_editor_line(line_num)
+                        threading.Thread(target=delayed_jump, daemon=True).start()
+            else:
+                # Flat string response (PC control command, news, SAPI switcher, etc.)
+                emotion = "speaking"
+                if any(w in response.lower() for w in ["sorry", "error", "unable", "couldn't"]):
+                    emotion = "sad"
+                elif any(w in response.lower() for w in ["perfect", "yes", "success", "great", "welcome"]):
+                    emotion = "happy"
+
+                if gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False):
+                    return
+
+                self.status_changed.emit(emotion)
+                self.response_generated.emit(response, False)
+                self._record_spoken_text(response)
+                self.speech_worker.put_speech(gen_id, response)
+
+                # Auto-jump cursor to line number if mentioned in the response
+                is_nav_command = any(phrase in command.lower() for phrase in ["jump to", "go to", "highlight", "move to", "navigate to"]) or re.search(r"\bline\s+(?:number\s+)?(\d+)\b", command.lower())
+                if not is_nav_command:
+                    line_match = re.search(r"\bline\s+(?:number\s+|no\.\s+)?(\d+)\b", response.lower())
+                    if line_match:
+                        line_num = line_match.group(1)
+                        def delayed_jump():
+                            time.sleep(2.5)
+                            import pc_control
+                            pc_control.navigate_to_editor_line(line_num)
+                        threading.Thread(target=delayed_jump, daemon=True).start()
+
+            # Extract learned facts in background only if not a system/vision command
+            cmd_clean = command.strip().lower()
+            import types
+            is_pc = not isinstance(response, types.GeneratorType)
+            is_screen = any(phrase in cmd_clean for phrase in ["screen", "desktop", "ocr", "active window", "display"])
+            is_cam = any(phrase in cmd_clean for phrase in ["you see", "see me", "look at", "look me", "camera", "webcam", "my room", "doing", "hand", "wearing", "holding"])
+            if not (is_pc or is_screen or is_cam):
+                memory_manager.extract_memory_in_background(
+                    command,
+                    lambda p, s, max_tokens=150: query_llm(p, s, max_tokens=max_tokens)
+                )
+
+        except Exception as logic_err:
+            print(f"[ASYNC COMMAND WORKER ERROR]: {logic_err}", flush=True)
+            if not (gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False)):
+                err_msg = "Sorry, I encountered an error processing your command."
+                self.status_changed.emit("sad")
+                self.response_generated.emit(err_msg, False)
+                self.speech_worker.put_speech(gen_id, err_msg)
 
     def run(self):
         import speech_recognition as sr
@@ -344,13 +608,14 @@ class VoiceAssistantThread(QThread):
             while self.running:
                 self.active_mode = flask_app.active_mode
 
-                if self.active_mode:
-                    self.status_changed.emit("listening")
-                else:
-                    if self.is_resting:
-                        self.status_changed.emit("idle")
+                if not tts_engine.is_speaking():
+                    if self.active_mode:
+                        self.status_changed.emit("listening")
                     else:
-                        self.status_changed.emit("sleeping")
+                        if self.is_resting:
+                            self.status_changed.emit("idle")
+                        else:
+                            self.status_changed.emit("sleeping")
 
                 try:
                     print(f"[COMPANION THREAD] Listening... (active_mode={self.active_mode})", flush=True)
@@ -359,10 +624,8 @@ class VoiceAssistantThread(QThread):
                     command = self.recognizer.recognize_google(audio, language='en-in').lower()
                     print(f"[MARK HEARD]: {command}", flush=True)
                 except sr.WaitTimeoutError:
-                    print("[COMPANION THREAD] Listen timeout", flush=True)
                     continue
                 except sr.UnknownValueError:
-                    # No speech detected in audio — normal, don't spam logs
                     continue
                 except sr.RequestError as e:
                     print(f"[COMPANION THREAD] Speech API error: {e}", flush=True)
@@ -392,11 +655,43 @@ class VoiceAssistantThread(QThread):
                             flask_app.active_mode = True
                             self.speech_detected.emit(command)
                             self.clear_speech()
+                            flask_app.stop_speaking_flag = False
                             self.status_changed.emit("speaking")
-                            self.speech_queue.put("Hello Anuj! How can I help?")
+                            self.speech_worker.put_speech(self.generation_id, "Hello Anuj! How can I help?")
                         continue
 
-                # Active mode conversation processing
+                # --- ACTIVE MODE VOICE PROCESSING ---
+                cmd_raw = command.strip().lower()
+
+                # 1. Voice Stop / Interrupt Check
+                cmd_stripped = cmd_raw
+                for prefix in ["hey mark", "ok mark", "mark", "hey meow", "ok meow", "meow", "baby"]:
+                    if cmd_stripped.startswith(prefix):
+                        cmd_stripped = cmd_stripped[len(prefix):].strip(",;:. ")
+                        break
+
+                STOP_PHRASES = {
+                    "stop", "stop it", "stop talking", "stop speaking", "shut up",
+                    "be quiet", "silence", "quiet", "cancel", "pause", "enough",
+                    "halt", "stop please", "please stop", "stop listening", "hold on",
+                    "shush", "cut it out", "don't talk", "dont talk", "abort"
+                }
+                if cmd_stripped in STOP_PHRASES:
+                    print(f"[VOICE INTERRUPT] User commanded stop: '{command}'", flush=True)
+                    self.clear_speech()
+                    self.status_changed.emit("idle")
+                    continue
+
+                # 2. Echo Cancellation: Ignore assistant hearing its own voice output
+                if tts_engine.is_speaking() and self._is_self_echo(command):
+                    print(f"[ECHO CANCEL] Detected assistant's own voice ('{command}'). Ignoring.", flush=True)
+                    continue
+
+                # 3. Voice Barge-In: If user speaks while assistant is speaking, cut speech immediately
+                if tts_engine.is_speaking():
+                    print(f"[VOICE BARGE-IN] User interrupted speech with new input: '{command}'", flush=True)
+                    self.clear_speech()
+
                 self.speech_detected.emit(command)
 
                 if self.dictation_mode:
@@ -404,22 +699,25 @@ class VoiceAssistantThread(QThread):
                     if any(phrase in target_cmd for phrase in ["stop typing", "stop writing", "stop dictation", "deactivate dictation"]):
                         self.dictation_mode = False
                         self.clear_speech()
+                        flask_app.stop_speaking_flag = False
                         self.status_changed.emit("speaking")
-                        self.speech_queue.put("Dictation mode deactivated, Boss.")
+                        self.speech_worker.put_speech(self.generation_id, "Dictation mode deactivated, Boss.")
                         continue
                     elif len(target_cmd.split()) <= 2 and any(w in target_cmd for w in ["save", "safe", "sav"]):
                         import pyautogui
                         pyautogui.hotkey('ctrl', 's')
                         self.clear_speech()
+                        flask_app.stop_speaking_flag = False
                         self.status_changed.emit("speaking")
-                        self.speech_queue.put("Saving, Boss.")
+                        self.speech_worker.put_speech(self.generation_id, "Saving, Boss.")
                         continue
                     elif len(target_cmd.split()) <= 2 and any(w in target_cmd for w in ["send", "sent"]):
                         import pyautogui
                         pyautogui.press('enter')
                         self.clear_speech()
+                        flask_app.stop_speaking_flag = False
                         self.status_changed.emit("speaking")
-                        self.speech_queue.put("Sending, Boss.")
+                        self.speech_worker.put_speech(self.generation_id, "Sending, Boss.")
                         continue
                     else:
                         import pyautogui
@@ -430,8 +728,9 @@ class VoiceAssistantThread(QThread):
                 if any(phrase in target_cmd for phrase in ["start typing", "write what i am saying", "start dictation", "dictation mode"]):
                     self.dictation_mode = True
                     self.clear_speech()
+                    flask_app.stop_speaking_flag = False
                     self.status_changed.emit("speaking")
-                    self.speech_queue.put("Dictation mode activated. I will type whatever you say in the active application, Boss.")
+                    self.speech_worker.put_speech(self.generation_id, "Dictation mode activated. I will type whatever you say in the active application, Boss.")
                     continue
 
                 if any(phrase in target_cmd for phrase in ["go to sleep", "sleep baby", "you can sleep", "sleep now", "take a nap", "stand down", "stop listening", "go offline"]) or target_cmd.strip() in ["sleep", "offline"]:
@@ -439,8 +738,9 @@ class VoiceAssistantThread(QThread):
                     flask_app.active_mode = False
                     self.is_resting = False
                     self.clear_speech()
+                    flask_app.stop_speaking_flag = False
                     self.status_changed.emit("speaking")
-                    self.speech_queue.put("Going offline. Say wake up to wake me up.")
+                    self.speech_worker.put_speech(self.generation_id, "Going offline. Say wake up to wake me up.")
                     continue
 
                 if "you are free" in target_cmd or "rest" in target_cmd:
@@ -448,16 +748,18 @@ class VoiceAssistantThread(QThread):
                     flask_app.active_mode = False
                     self.is_resting = True
                     self.clear_speech()
+                    flask_app.stop_speaking_flag = False
                     self.status_changed.emit("speaking")
-                    self.speech_queue.put("Okay, I will rest now.")
+                    self.speech_worker.put_speech(self.generation_id, "Okay, I will rest now.")
                     continue
 
                 if any(phrase in command for phrase in ["restart yourself", "reboot yourself", "restart meow"]):
                     self.active_mode = False
                     flask_app.active_mode = False
                     self.clear_speech()
+                    flask_app.stop_speaking_flag = False
                     self.status_changed.emit("speaking")
-                    self.speech_queue.put("Restarting myself, Boss. See you in a moment!")
+                    self.speech_worker.put_speech(self.generation_id, "Restarting myself, Boss. See you in a moment!")
                     self.running = False
                     time.sleep(2.0)
                     import subprocess
@@ -473,140 +775,36 @@ class VoiceAssistantThread(QThread):
                     self.active_mode = False
                     flask_app.active_mode = False
                     self.clear_speech()
+                    flask_app.stop_speaking_flag = False
                     self.status_changed.emit("speaking")
-                    self.speech_queue.put("Shutting down. Bye bye!")
+                    self.speech_worker.put_speech(self.generation_id, "Shutting down. Bye bye!")
                     self.running = False
                     self.status_changed.emit("sleeping")
                     time.sleep(2.0)
                     import os
                     os._exit(0)
 
-                # Clear any ongoing speaking before starting thinking
+                # Prepare for new command execution
                 self.clear_speech()
-                self.status_changed.emit("thinking")
+                flask_app.stop_speaking_flag = False
+                self.generation_id += 1
+                if hasattr(self, 'speech_worker') and self.speech_worker:
+                    self.speech_worker.generation_id = self.generation_id
 
-                # Voice 2.0 — check for style-change command before LLM call
-                style_key, style_msg = voice_personality.detect_style_change(command)
-                if style_key:
-                    self.status_changed.emit("speaking")
-                    self.speech_queue.put(style_msg)
-                    continue
-
-                try:
-                    response = self.process_assistant_logic(command)
-                    
-                    import types
-                    if isinstance(response, types.GeneratorType):
-                        # Real-time streaming response loop
-                        accumulated_text = ""
-                        sentence_buffer = ""
-                        first_dispatched = False
-                        
-                        try:
-                            for chunk in response:
-                                if flask_app.stop_speaking_flag:
-                                    break
-                                accumulated_text += chunk
-                                sentence_buffer += chunk
-                                
-                                # Emit to UI in real-time token-by-token
-                                self.response_generated.emit(accumulated_text, True)
-                                
-                                # Fast-start: dispatch first phrase early on comma or punctuation to eliminate silence
-                                if not first_dispatched:
-                                    if re.search(r'[.!?]', sentence_buffer) or (len(sentence_buffer.split()) >= 4 and re.search(r'[,;:\n]', sentence_buffer)):
-                                        parts = re.split(r'(?<=[.!?,;:\n])', sentence_buffer, maxsplit=1)
-                                        if len(parts) > 1 and parts[0].strip():
-                                            self.speech_queue.put(parts[0].strip())
-                                            sentence_buffer = parts[1]
-                                            first_dispatched = True
-                                            continue
-
-                                # Split completed sentences immediately upon finding punctuation (excluding common abbreviations)
-                                sentences = re.split(r'(?<=[.!?])', sentence_buffer)
-                                if len(sentences) > 1:
-                                    new_buffer = ""
-                                    for s in sentences[:-1]:
-                                        s_clean = s.strip()
-                                        words = s_clean.split()
-                                        if words and words[-1].lower() in ["mr.", "mrs.", "dr.", "ms.", "st.", "e.g.", "i.e.", "vs."]:
-                                            new_buffer += s
-                                        else:
-                                            if s_clean:
-                                                self.speech_queue.put(s_clean)
-                                                first_dispatched = True
-                                    sentence_buffer = new_buffer + sentences[-1]
-                        except Exception as loop_err:
-                            print(f"[THREAD GENERATOR LOOP ERROR]: {loop_err}")
-                            if not accumulated_text.strip():
-                                accumulated_text = "Sorry, I encountered an error receiving the response stream."
-                                self.response_generated.emit(accumulated_text, False)
-                                self.speech_queue.put(accumulated_text)
-                            
-                        # Flush remaining buffer
-                        if sentence_buffer.strip() and not flask_app.stop_speaking_flag:
-                            self.speech_queue.put(sentence_buffer.strip())
-
-                            
-                        # Save response to history
-                        self.add_to_history(command, accumulated_text, llm_router._last_reasoning_details)
-                        
-                        # Auto-jump cursor to line number if mentioned in the response (and not already executed by an explicit navigation command)
-                        is_nav_command = any(phrase in command.lower() for phrase in ["jump to", "go to", "highlight", "move to", "navigate to"]) or re.search(r"\bline\s+(?:number\s+)?(\d+)\b", command.lower())
-                        if not is_nav_command:
-                            line_match = re.search(r"\bline\s+(?:number\s+|no\.\s+)?(\d+)\b", accumulated_text.lower())
-                            if line_match:
-                                line_num = line_match.group(1)
-                                def delayed_jump():
-                                    import time
-                                    time.sleep(2.5)
-                                    import pc_control
-                                    pc_control.navigate_to_editor_line(line_num)
-                                threading.Thread(target=delayed_jump, daemon=True).start()
-                    else:
-                        # Flat string response (PC control command, news, SAPI switcher, etc.)
-                        emotion = "speaking"
-                        if any(w in response.lower() for w in ["sorry", "error", "unable", "couldn't"]):
-                            emotion = "sad"
-                        elif any(w in response.lower() for w in ["perfect", "yes", "success", "great", "welcome"]):
-                            emotion = "happy"
-                            
-                        self.status_changed.emit(emotion)
-                        self.response_generated.emit(response, False)
-                        self.speech_queue.put(response)
-                        
-                        # Auto-jump cursor to line number if mentioned in the response (and not already executed by an explicit navigation command)
-                        is_nav_command = any(phrase in command.lower() for phrase in ["jump to", "go to", "highlight", "move to", "navigate to"]) or re.search(r"\bline\s+(?:number\s+)?(\d+)\b", command.lower())
-                        if not is_nav_command:
-                            line_match = re.search(r"\bline\s+(?:number\s+|no\.\s+)?(\d+)\b", response.lower())
-                            if line_match:
-                                line_num = line_match.group(1)
-                                def delayed_jump():
-                                    import time
-                                    time.sleep(2.5)
-                                    import pc_control
-                                    pc_control.navigate_to_editor_line(line_num)
-                                threading.Thread(target=delayed_jump, daemon=True).start()
-                except Exception as logic_err:
-                    print(f"[THREAD LOGIC ERROR]: {logic_err}")
-                    err_msg = "Sorry, I encountered an error processing your command."
-                    self.status_changed.emit("sad")
-                    self.response_generated.emit(err_msg, False)
-                    self.speech_queue.put(err_msg)
-
-                # Extract learned facts in background only if not a system/vision command
-                cmd_clean = command.strip().lower()
-                is_pc = not isinstance(response, types.GeneratorType)
-                is_screen = any(phrase in cmd_clean for phrase in ["screen", "desktop", "ocr", "active window", "display"])
-                is_cam = any(phrase in cmd_clean for phrase in ["you see", "see me", "look at", "look me", "camera", "webcam", "my room", "doing", "hand", "wearing", "holding"])
-                if not (is_pc or is_screen or is_cam):
-                    memory_manager.extract_memory_in_background(
-                        command,
-                        lambda p, s, max_tokens=150: query_llm(p, s, max_tokens=max_tokens)
-                    )
+                # Dispatch assistant processing in a background worker thread
+                threading.Thread(
+                    target=self._process_command_worker,
+                    args=(command, self.generation_id),
+                    daemon=True
+                ).start()
 
     def process_assistant_logic(self, command):
         cmd_clean = command.strip().lower()
+
+        # Direct stop command check
+        if cmd_clean in ["stop", "stop it", "stop talking", "stop speaking", "shut up", "be quiet", "silence", "quiet", "cancel", "pause", "enough"]:
+            self.clear_speech()
+            return "Stopped."
 
         # ── Emotion engine: update mood from this command ────────────────────
         if _emotion_mod:

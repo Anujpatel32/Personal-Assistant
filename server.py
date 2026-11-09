@@ -377,6 +377,11 @@ async def stop_speaking():
     """Stop the assistant from speaking."""
     if _flask_app:
         _flask_app.stop_speaking_flag = True
+    try:
+        import tts_engine
+        tts_engine.stop()
+    except Exception:
+        pass
     if _mascot_ref:
         try:
             _mascot_ref.interrupt_speech()

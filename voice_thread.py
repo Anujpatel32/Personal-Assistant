@@ -146,6 +146,12 @@ class SpeechQueueWorker(QThread):
                     else:
                         gen_id, text = self.generation_id, item
 
+                    # Strip asterisks, markdown, and emojis before synthesis
+                    text = tts_engine.clean_text_for_tts(text)
+                    if not text.strip():
+                        self.speech_queue.task_done()
+                        continue
+
                     if gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False):
                         self.speech_queue.task_done()
                         continue
@@ -491,9 +497,10 @@ class VoiceAssistantThread(QThread):
                             if re.search(r'[.!?]', sentence_buffer) or (len(sentence_buffer.split()) >= 4 and re.search(r'[,;:\n]', sentence_buffer)):
                                 parts = re.split(r'(?<=[.!?,;:\n])', sentence_buffer, maxsplit=1)
                                 if len(parts) > 1 and parts[0].strip():
-                                    piece = parts[0].strip()
-                                    self._record_spoken_text(piece)
-                                    self.speech_worker.put_speech(gen_id, piece)
+                                    piece = tts_engine.clean_text_for_tts(parts[0].strip())
+                                    if piece:
+                                        self._record_spoken_text(piece)
+                                        self.speech_worker.put_speech(gen_id, piece)
                                     sentence_buffer = parts[1]
                                     first_dispatched = True
                                     continue
@@ -508,6 +515,7 @@ class VoiceAssistantThread(QThread):
                                 if words and words[-1].lower() in ["mr.", "mrs.", "dr.", "ms.", "st.", "e.g.", "i.e.", "vs."]:
                                     new_buffer += s
                                 else:
+                                    s_clean = tts_engine.clean_text_for_tts(s_clean)
                                     if s_clean:
                                         self._record_spoken_text(s_clean)
                                         self.speech_worker.put_speech(gen_id, s_clean)
@@ -522,9 +530,10 @@ class VoiceAssistantThread(QThread):
 
                 # Flush remaining buffer
                 if sentence_buffer.strip() and not (gen_id != self.generation_id or getattr(flask_app, "stop_speaking_flag", False)):
-                    rem = sentence_buffer.strip()
-                    self._record_spoken_text(rem)
-                    self.speech_worker.put_speech(gen_id, rem)
+                    rem = tts_engine.clean_text_for_tts(sentence_buffer.strip())
+                    if rem:
+                        self._record_spoken_text(rem)
+                        self.speech_worker.put_speech(gen_id, rem)
 
                 # Save response to history
                 if accumulated_text.strip():
@@ -554,8 +563,10 @@ class VoiceAssistantThread(QThread):
 
                 self.status_changed.emit(emotion)
                 self.response_generated.emit(response, False)
-                self._record_spoken_text(response)
-                self.speech_worker.put_speech(gen_id, response)
+                resp_clean = tts_engine.clean_text_for_tts(response)
+                if resp_clean:
+                    self._record_spoken_text(resp_clean)
+                    self.speech_worker.put_speech(gen_id, resp_clean)
 
                 # Auto-jump cursor to line number if mentioned in the response
                 is_nav_command = any(phrase in command.lower() for phrase in ["jump to", "go to", "highlight", "move to", "navigate to"]) or re.search(r"\bline\s+(?:number\s+)?(\d+)\b", command.lower())

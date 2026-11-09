@@ -84,3 +84,22 @@ def test_self_echo_detection():
     assert thread._is_self_echo("what is the weather today") is False
     assert thread._is_self_echo("play music") is False
     assert thread._is_self_echo("stop") is False
+
+
+def test_clean_text_for_tts_removes_asterisks():
+    # Bold, italic, bullets, dangling asterisks
+    cases = [
+        ("**bold text**", "bold text"),
+        ("*italic text*", "italic text"),
+        ("***bold italic***", "bold italic"),
+        ("* item one\n* item two", "item one item two"),
+        ("Dangling * asterisk", "Dangling asterisk"),
+        ("Multiple *** stars ** everywhere *", "Multiple stars everywhere"),
+        ("Here is **point 1**: and *point 2*", "Here is point 1: and point 2"),
+    ]
+    for inp, expected in cases:
+        cleaned = tts_engine.clean_text_for_tts(inp)
+        assert "*" not in cleaned
+        assert cleaned == expected
+
+

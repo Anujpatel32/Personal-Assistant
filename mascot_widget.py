@@ -360,7 +360,9 @@ class MascotWidget(QWidget):
                                 if re.search(r'[.!?]', sentence_buffer) or (len(sentence_buffer.split()) >= 4 and re.search(r'[,;:\n]', sentence_buffer)):
                                     parts = re.split(r'(?<=[.!?,;:\n])', sentence_buffer, maxsplit=1)
                                     if len(parts) > 1 and parts[0].strip():
-                                        self.backend_thread.speech_queue.put(parts[0].strip())
+                                        piece = tts_engine.clean_text_for_tts(parts[0].strip())
+                                        if piece:
+                                            self.backend_thread.speech_queue.put(piece)
                                         sentence_buffer = parts[1]
                                         first_dispatched = True
                                         continue
@@ -375,6 +377,7 @@ class MascotWidget(QWidget):
                                     if words and words[-1].lower() in ["mr.", "mrs.", "dr.", "ms.", "st.", "e.g.", "i.e.", "vs."]:
                                         new_buffer += s
                                     else:
+                                        s_clean = tts_engine.clean_text_for_tts(s_clean)
                                         if s_clean:
                                             self.backend_thread.speech_queue.put(s_clean)
                                             first_dispatched = True
@@ -387,7 +390,9 @@ class MascotWidget(QWidget):
                             self.backend_thread.speech_queue.put(accumulated_text)
                             
                     if sentence_buffer.strip() and not flask_app.stop_speaking_flag:
-                        self.backend_thread.speech_queue.put(sentence_buffer.strip())
+                        rem = tts_engine.clean_text_for_tts(sentence_buffer.strip())
+                        if rem:
+                            self.backend_thread.speech_queue.put(rem)
 
                         
                     self.backend_thread.add_to_history(command, accumulated_text, llm_router._last_reasoning_details)
@@ -399,7 +404,9 @@ class MascotWidget(QWidget):
                         emotion = "happy"
                     self.backend_thread.status_changed.emit(emotion)
                     self.backend_thread.response_generated.emit(response, False)
-                    self.backend_thread.speech_queue.put(response)
+                    resp_clean = tts_engine.clean_text_for_tts(response)
+                    if resp_clean:
+                        self.backend_thread.speech_queue.put(resp_clean)
             except Exception as logic_err:
                 print(f"[REMOTE LOGIC ERROR]: {logic_err}")
                 err_msg = "Sorry, I encountered an error processing your remote command."

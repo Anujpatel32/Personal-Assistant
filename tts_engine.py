@@ -46,6 +46,8 @@ def clean_text_for_tts(text):
     # Remove bold/italic markers (** __ * _)
     text = re.sub(r'\*{1,3}(.*?)\*{1,3}', r'\1', text)
     text = re.sub(r'_{1,3}(.*?)_{1,3}', r'\1', text)
+    # Remove any remaining asterisks completely so they are never read aloud
+    text = text.replace('*', '')
     # Remove markdown links [text](url) -> text
     text = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', text)
     # Remove markdown images ![alt](url)
@@ -171,6 +173,10 @@ def stop():
 
 def play_sapi(text, on_start_speaking=None):
     if flask_app and getattr(flask_app, "stop_speaking_flag", False):
+        return
+
+    text = clean_text_for_tts(text)
+    if not text.strip():
         return
 
     try:

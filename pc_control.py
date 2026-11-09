@@ -1357,17 +1357,45 @@ def send_whatsapp_message(contact, message):
 
 
 def play_youtube_song(song_name):
-    """Searches YouTube for the song and opens the first video result in the browser."""
+    """Searches YouTube for the song or playlist and opens it in the browser."""
     import webbrowser
     import urllib.request
     import urllib.parse
     import re as _re
     import ssl
+    import threading
+
+    clean = song_name.strip().lower()
+
+    # 1. Direct recognized YouTube special user playlists
+    if any(p in clean for p in [
+        "liked playlist", "liked songs", "liked videos", "my liked", "liked music",
+        "liked youtube playlist", "liked youtube", "my likes", "thumbs up"
+    ]):
+        if any(m in clean for m in ["music.youtube", "youtube music", "yt music"]):
+            url = "https://music.youtube.com/playlist?list=LM"
+            msg = "Playing your Liked Music on YouTube Music for you, Boss."
+        else:
+            url = "https://www.youtube.com/watch?list=LL"
+            msg = "Playing your Liked Videos playlist on YouTube for you, Boss."
+        threading.Thread(target=webbrowser.open_new_tab, args=(url,), daemon=True).start()
+        return msg
+
+    if any(p in clean for p in ["watch later", "my watch later"]):
+        url = "https://www.youtube.com/watch?list=WL"
+        threading.Thread(target=webbrowser.open_new_tab, args=(url,), daemon=True).start()
+        return "Playing your Watch Later playlist on YouTube for you, Boss."
+
+    # 2. General Playlist search vs Song search
+    is_playlist = "playlist" in clean
     try:
-        query = urllib.parse.quote_plus(f"{song_name} song")
-        # Search DuckDuckGo restricted to YouTube
+        if is_playlist:
+            search_query = f"{song_name} site:youtube.com/playlist"
+        else:
+            search_query = f"{song_name} site:youtube.com/watch"
+
         search_url = "https://html.duckduckgo.com/html/"
-        data = urllib.parse.urlencode({"q": f"{song_name} site:youtube.com"}).encode("utf-8")
+        data = urllib.parse.urlencode({"q": search_query}).encode("utf-8")
         req = urllib.request.Request(
             search_url,
             data=data,
@@ -1379,23 +1407,34 @@ def play_youtube_song(song_name):
         context = ssl._create_unverified_context()
         with urllib.request.urlopen(req, context=context, timeout=8) as resp:
             html = resp.read().decode("utf-8", errors="ignore")
-        # Extract first YouTube watch URL
-        match = _re.search(r'https://(?:www\.)?youtube\.com/watch\?v=[A-Za-z0-9_\-]+', html)
-        if match:
-            url = match.group(0)
-        else:
-            # Fallback: direct YouTube search URL
-            url = f"https://www.youtube.com/results?search_query={query}"
-        import threading
+
+        url = None
+        if is_playlist:
+            pl_match = _re.search(r'https://(?:www\.)?youtube\.com/playlist\?list=[A-Za-z0-9_\-]+', html)
+            if pl_match:
+                url = pl_match.group(0)
+
+        if not url:
+            # Extract first YouTube watch URL
+            v_match = _re.search(r'https://(?:www\.)?youtube\.com/watch\?v=[A-Za-z0-9_\-]+', html)
+            if v_match:
+                url = v_match.group(0)
+
+        if not url:
+            # Fallback: direct YouTube search page
+            query_enc = urllib.parse.quote_plus(song_name)
+            if is_playlist:
+                url = f"https://www.youtube.com/results?search_query={query_enc}&sp=EgIQAw%253D%253D"
+            else:
+                url = f"https://www.youtube.com/results?search_query={query_enc}"
+
         threading.Thread(target=webbrowser.open_new_tab, args=(url,), daemon=True).start()
         return f"Playing {song_name} on YouTube for you, Boss."
     except Exception as e:
         print(f"[PC CONTROL ERROR] YouTube play failed: {e}")
-        # Hard fallback to search page
         try:
-            query = urllib.parse.quote_plus(f"{song_name} song")
-            url = f"https://www.youtube.com/results?search_query={query}"
-            import threading
+            query_enc = urllib.parse.quote_plus(song_name)
+            url = f"https://www.youtube.com/results?search_query={query_enc}"
             threading.Thread(target=webbrowser.open_new_tab, args=(url,), daemon=True).start()
             return f"Opening YouTube search for {song_name}, Boss."
         except Exception:

@@ -596,7 +596,7 @@ class VoiceAssistantThread(QThread):
 
                 # Extract learned facts in background only if not a system/vision command
                 cmd_clean = command.strip().lower()
-                is_pc = pc_control.handle_pc_command(command) is not None
+                is_pc = not isinstance(response, types.GeneratorType)
                 is_screen = any(phrase in cmd_clean for phrase in ["screen", "desktop", "ocr", "active window", "display"])
                 is_cam = any(phrase in cmd_clean for phrase in ["you see", "see me", "look at", "look me", "camera", "webcam", "my room", "doing", "hand", "wearing", "holding"])
                 if not (is_pc or is_screen or is_cam):
